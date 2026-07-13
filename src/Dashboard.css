@@ -593,3 +593,32 @@ body {
   stroke-width: 3px;
   filter: brightness(1.2);
 }
+
+/* Dashboard.css 하단에 추가 */
+.map-back-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.4);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s;
+}
+
+.map-back-btn:hover {
+  background-color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.geography-path {
+  transition: all 0.2s ease-in-out;
+}
