@@ -45,7 +45,7 @@ const PROVINCE_MAP_CONFIG = {
 const METRICS = [
   { id: 'housing', label: '주택(건)', unit: '건' },
   { id: 'housingZ', label: '주택(Z값)', unit: '' },
-  { id: 'greenhouse', label: '온실(m2)', unit: 'm²' },
+  { id: 'greenhouse', label: '온실(m²)', unit: 'm²' },
   { id: 'greenhouseZ', label: '온실(Z값)', unit: '' },
   { id: 'smallbiz', label: '소상공인(건)', unit: '건' },
   { id: 'population', label: '인구수(건)', unit: '명' },
