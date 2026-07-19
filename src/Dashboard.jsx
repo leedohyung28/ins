@@ -114,6 +114,45 @@ const parseCSV = (csvText) => {
   return { totals, dataMap };
 };
 
+// 두 헥스(Hex) 색상 간의 혼합을 계산하는 함수
+const interpolateColor = (color1, color2, factor) => {
+  const hex1 = color1.replace('#', '');
+  const hex2 = color2.replace('#', '');
+  
+  const r1 = parseInt(hex1.substring(0, 2), 16);
+  const g1 = parseInt(hex1.substring(2, 4), 16);
+  const b1 = parseInt(hex1.substring(4, 6), 16);
+  
+  const r2 = parseInt(hex2.substring(0, 2), 16);
+  const g2 = parseInt(hex2.substring(2, 4), 16);
+  const b2 = parseInt(hex2.substring(4, 6), 16);
+  
+  const r = Math.round(r1 + factor * (r2 - r1));
+  const g = Math.round(g1 + factor * (g2 - g1));
+  const b = Math.round(b1 + factor * (b2 - b1));
+  
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
+};
+
+// 0~1 사이의 비율에 따라 다중 그라데이션 색상을 반환하는 함수
+const getGradientColor = (ratio) => {
+  // 매우 낮음(다크그린) -> 매우 높음(레드)
+  const stops = ['#15803D', '#84CC16', '#EAB308', '#F97316', '#EF4444']; 
+  if (ratio <= 0) return stops[0];
+  if (ratio >= 1) return stops[stops.length - 1];
+  
+  const scaled = ratio * (stops.length - 1); // 0 ~ 4
+  const index = Math.floor(scaled);          // 0, 1, 2, 3
+  const factor = scaled - index;             // 소수점 (혼합 비율)
+  
+  return interpolateColor(stops[index], stops[index + 1], factor);
+};
+
+// 환경에 따른 안전한 베이스 URL 추출
+const getBaseUrl = () => {
+  return process.env.PUBLIC_URL || '';
+};
+
 const Dashboard = () => {
   const [availableYears, setAvailableYears] = useState([]);
   const [selectedYear, setSelectedYear] = useState(''); 
@@ -124,7 +163,7 @@ const Dashboard = () => {
   const [hoveredRegion, setHoveredRegion] = useState(null);
   const [hoveredMunicipality, setHoveredMunicipality] = useState(null);
 
-  const [mapView, setMapView] = useState('national'); // 'national' | 'province'
+  const [mapView, setMapView] = useState('national'); 
   const [mapCenter, setMapCenter] = useState([127.5, 36]);
   const [mapZoom, setMapZoom] = useState(1.5);
   const [selectedProvCode, setSelectedProvCode] = useState(null);
@@ -135,10 +174,16 @@ const Dashboard = () => {
   const [selectedMetricIdx, setSelectedMetricIdx] = useState(0);
   const currentMetric = METRICS[selectedMetricIdx];
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
   const fetchCSVData = async (url) => {
     try {
       const res = await fetch(url);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn(`파일을 찾을 수 없습니다 (상태코드 ${res.status}): ${url}`);
+        return null;
+      }
 
       const contentType = res.headers.get('content-type');
       if (contentType && contentType.includes('text/html')) return null;
@@ -157,18 +202,26 @@ const Dashboard = () => {
 
       return parseCSV(csvText);
     } catch (e) {
+      console.error(`데이터 페칭 에러 (${url}):`, e);
       return null;
     }
   };
 
   useEffect(() => {
     const probeAndLoadYears = async () => {
+      setIsLoading(true);
+      setHasError(false);
+
       const yearsToTry = [2022, 2023, 2024, 2025, 2026, 2027, 2028]; 
       const valid = [];
       const cacheUpdate = {};
+      const baseUrl = getBaseUrl();
 
       for (const y of yearsToTry) {
-        const result = await fetchCSVData(`/data/top/${y}data.csv`);
+        const result = await fetchCSVData(`${baseUrl}/data/top/${y}data.csv`);
+
+        console.log(`[${y}년] 현재 요청 경로:`, result);
+
         if (result && Object.keys(result.dataMap).length > 0) {
           valid.push(y);
           cacheUpdate[y] = result;
@@ -179,7 +232,11 @@ const Dashboard = () => {
         setNationalDataCache(prev => ({ ...prev, ...cacheUpdate }));
         setAvailableYears(valid);
         setSelectedYear(valid[valid.length - 1]); 
+      } else {
+        setHasError(true);
+        setAvailableYears([]);
       }
+      setIsLoading(false);
     };
     probeAndLoadYears();
   }, []);
@@ -190,7 +247,8 @@ const Dashboard = () => {
       const cacheKey = `${engName}_${selectedYear}`;
       
       if (engName && !municipalDataCache[cacheKey]) {
-        fetchCSVData(`/data/${engName}/${selectedYear}data.csv`).then(result => {
+        const baseUrl = getBaseUrl();
+        fetchCSVData(`${baseUrl}/data/${engName}/${selectedYear}data.csv`).then(result => {
           setMunicipalDataCache(prev => ({ 
             ...prev, 
             [cacheKey]: result || { totals: {}, dataMap: {} } 
@@ -198,43 +256,38 @@ const Dashboard = () => {
         });
       }
     }
-  }, [mapView, selectedRegion, selectedYear]);
+  }, [mapView, selectedRegion, selectedYear, municipalDataCache]);
 
-  // ✨ [추가] CSV 다운로드 처리 함수
   const handleDownload = async () => {
     if (!selectedYear) {
       alert("선택된 년도 데이터가 없습니다.");
       return;
     }
 
-    // 현재 지도 상태에 따라 다운로드 경로 설정
+    const baseUrl = getBaseUrl();
     let downloadUrl = '';
     let fileName = '';
 
     if (mapView === 'national') {
-      downloadUrl = `/data/top/${selectedYear}data.csv`;
+      downloadUrl = `${baseUrl}/data/top/${selectedYear}data.csv`;
       fileName = `전국_${selectedYear}년_데이터.csv`;
     } else {
       const engName = regionFolderMapping[selectedRegion];
-      downloadUrl = `/data/${engName}/${selectedYear}data.csv`;
+      downloadUrl = `${baseUrl}/data/${engName}/${selectedYear}data.csv`;
       fileName = `${selectedRegion}_${selectedYear}년_데이터.csv`;
     }
 
     try {
-      // 파일이 실제로 존재하는지 확인 (HEAD 요청)
       const res = await fetch(downloadUrl, { method: 'HEAD' });
-      
-      // 로컬 개발서버에서 404대신 index.html을 반환하는 경우 방어
       const contentType = res.headers.get('content-type');
       if (!res.ok || (contentType && contentType.includes('text/html'))) {
         alert("해당 년도의 지역 데이터가 존재하지 않습니다.");
         return;
       }
 
-      // 앵커 태그를 생성하여 브라우저 다운로드 트리거
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = fileName; // 다운로드 파일명 지정
+      link.download = fileName; 
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -244,7 +297,6 @@ const Dashboard = () => {
       alert("다운로드 중 오류가 발생했습니다. 데이터가 존재하지 않을 수 있습니다.");
     }
   };
-
 
   const handleProvinceClick = (geo) => {
     const provNameFull = geo.properties.name;
@@ -304,14 +356,12 @@ const Dashboard = () => {
   });
 
   const getColor = (val) => {
-    if (val === null || val === undefined) return '#94A3B8';
-    if (metricMin === metricMax) return '#EAB308';
-    const ratio = (val - metricMin) / (metricMax - metricMin);
-    if (ratio >= 0.8) return '#EF4444';
-    if (ratio >= 0.6) return '#F97316';
-    if (ratio >= 0.4) return '#EAB308';
-    if (ratio >= 0.2) return '#84CC16';
-    return '#15803D';
+    if (val === null || val === undefined) return '#94A3B8'; // 데이터 없음
+    if (metricMin === metricMax) return '#EAB308';           // 값이 모두 같을 때
+    
+    // 0 ~ 1 사이의 비율 계산 후 그라데이션 색상 가져오기
+    const ratio = Math.max(0, Math.min(1, (val - metricMin) / (metricMax - metricMin)));
+    return getGradientColor(ratio);
   };
 
   const coloredMapData = {};
@@ -368,10 +418,6 @@ const Dashboard = () => {
         </div>
         <nav className="nav-menu">
           <div className="nav-item active">대시보드</div>
-          {/* <div className="nav-item">지도 보기</div>
-          <div className="nav-item">지역 분석</div>
-          <div className="nav-item">재난 위험 분석</div> */}
-          {/* ✨ [적용] 다운로드 클릭 이벤트 바인딩 */}
           <div className="nav-item" onClick={handleDownload} style={{ cursor: 'pointer' }}>데이터 다운로드</div>
         </nav>
       </aside>
@@ -379,7 +425,11 @@ const Dashboard = () => {
       <div className="main-area">
         <header className="header">
           <div className="header-left">
-            {availableYears.length > 0 ? (
+            {isLoading ? (
+              <span style={{ fontWeight: 'bold', color: '#94A3B8' }}>데이터 로딩중...</span>
+            ) : hasError ? (
+              <span style={{ fontWeight: 'bold', color: '#EF4444' }}>데이터를 불러올 수 없습니다. 경로를 확인해주세요.</span>
+            ) : availableYears.length > 0 ? (
               <select 
                 value={selectedYear} 
                 onChange={(e) => setSelectedYear(Number(e.target.value))} 
@@ -404,9 +454,7 @@ const Dashboard = () => {
                   </option>
                 ))}
               </select>
-            ) : (
-              <span style={{ fontWeight: 'bold', color: '#94A3B8' }}>데이터 로딩중...</span>
-            )}
+            ) : null}
           </div>
           <div className="header-right">
             <span>데이터 연동 완료</span>
@@ -450,7 +498,7 @@ const Dashboard = () => {
             <div className="left-column">
               <div className="map-card" style={{ overflow: 'hidden', height: 'auto', minHeight: '500px' }}>
                 <h3>
-                  {selectedYear}년 지역별 지표 현황 ⓘ 
+                  {selectedYear || '-'}년 지역별 지표 현황 ⓘ 
                   <span style={{fontSize:'12px', color:'#94A3B8', marginLeft:'8px'}}>
                     {mapView === 'national' ? '(시/도를 클릭하여 줌인하세요)' : '(시/군/구를 클릭하여 상세 조회하세요)'}
                   </span>
@@ -464,12 +512,25 @@ const Dashboard = () => {
 
                 <div className="map-legend">
                   <p style={{marginBottom: '8px', fontWeight: 'bold'}}>{currentMetric.label} 분포</p>
-                  <div className="legend-item"><div className="legend-color" style={{background: '#EF4444'}}></div> 상위 20% (매우 높음)</div>
-                  <div className="legend-item"><div className="legend-color" style={{background: '#F97316'}}></div> 상위 20~40% (높음)</div>
-                  <div className="legend-item"><div className="legend-color" style={{background: '#EAB308'}}></div> 평균 수준 (보통)</div>
-                  <div className="legend-item"><div className="legend-color" style={{background: '#84CC16'}}></div> 하위 20~40% (낮음)</div>
-                  <div className="legend-item"><div className="legend-color" style={{background: '#15803D'}}></div> 하위 20% (매우 낮음)</div>
-                  <div className="legend-item"><div className="legend-color" style={{background: '#94A3B8'}}></div> 데이터 없음</div>
+                  
+                  {/* 그라데이션 라벨 */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94A3B8', marginBottom: '4px' }}>
+                    <span>낮음</span>
+                    <span>높음</span>
+                  </div>
+                  
+                  {/* 연속된 색상 바 */}
+                  <div style={{
+                    height: '12px',
+                    background: 'linear-gradient(to right, #15803D, #84CC16, #EAB308, #F97316, #EF4444)',
+                    borderRadius: '6px',
+                    marginBottom: '8px'
+                  }}></div>
+                  
+                  {/* 데이터 없음 항목은 별도 표시 */}
+                  <div className="legend-item" style={{ marginTop: '12px' }}>
+                    <div className="legend-color" style={{background: '#94A3B8'}}></div> 데이터 없음
+                  </div>
                 </div>
 
                 <div style={{ width: '100%', height: '400px' }}>
@@ -572,9 +633,9 @@ const Dashboard = () => {
 
               <div className="bottom-charts-row" style={{ display: 'block', width: '100%', marginTop: '20px' }}>
                 <div className="chart-card" style={{ width: '100%' }}>
-                  <h3>{currentMetric.label} TOP 5 ({selectedYear}년)</h3>
+                  <h3>{currentMetric.label} TOP 5 ({selectedYear || '-'}년)</h3>
                   <div style={{ marginTop: '16px' }}>
-                    {topRegions.map((region, idx) => {
+                    {topRegions.length > 0 ? topRegions.map((region, idx) => {
                       const val = region[1][currentMetric.id];
                       const barWidth = metricMax > metricMin ? ((val - metricMin) / (metricMax - metricMin)) * 100 : 50;
                       return (
@@ -587,11 +648,12 @@ const Dashboard = () => {
                           <span className="bar-value" style={{ width: '60px', textAlign: 'right' }}>{val.toLocaleString()}</span>
                         </div>
                       )
-                    })}
+                    }) : (
+                      <div style={{ textAlign: 'center', color: '#94A3B8', marginTop: '20px' }}>데이터가 없습니다.</div>
+                    )}
                   </div>
                 </div>
               </div>
-
             </div>
 
             <div className="right-column">
@@ -644,7 +706,7 @@ const Dashboard = () => {
                 <div className="ai-insight">
                   <h4>✨ 분석 인사이트</h4>
                   <p>
-                    선택하신 <b>{targetName}</b>의 {selectedYear}년 기준 상세 지표 현황입니다.
+                    선택하신 <b>{targetName}</b>의 {selectedYear || '-'}년 기준 상세 지표 현황입니다.
                     지도 아래의 슬라이더를 통해 주택, 온실, 소상공인, 인구수 관련 항목을 변경하여 직관적인 분포도를 확인할 수 있습니다.
                   </p>
                 </div>
