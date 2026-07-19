@@ -42,7 +42,6 @@ const PROVINCE_MAP_CONFIG = {
   '제주': { code: '39', center: [126.5311, 33.3996], zoom: 10 }
 };
 
-// 표시할 지표 목록
 const METRICS = [
   { id: 'housing', label: '주택(건)', unit: '건' },
   { id: 'housingZ', label: '주택(Z값)', unit: '' },
@@ -58,7 +57,6 @@ const parseVal = (val) => {
   return isNaN(parsed) ? null : parsed;
 };
 
-// 따옴표 내부의 콤마(,)를 무시하고 정상적으로 칼럼을 분리하는 함수
 const parseCSVLine = (line) => {
   const result = [];
   let current = '';
@@ -117,14 +115,12 @@ const parseCSV = (csvText) => {
 };
 
 const Dashboard = () => {
-  // ✨ 동적으로 파싱된 가용 연도 목록 상태
   const [availableYears, setAvailableYears] = useState([]);
   const [selectedYear, setSelectedYear] = useState(''); 
   
   const [selectedRegion, setSelectedRegion] = useState('서울');
   const [selectedMunicipality, setSelectedMunicipality] = useState(null); 
 
-  // ✨ Hover 처리를 위한 상태 추가
   const [hoveredRegion, setHoveredRegion] = useState(null);
   const [hoveredMunicipality, setHoveredMunicipality] = useState(null);
 
@@ -143,6 +139,10 @@ const Dashboard = () => {
     try {
       const res = await fetch(url);
       if (!res.ok) return null;
+
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) return null;
+
       const buffer = await res.arrayBuffer();
       
       let decoder = new TextDecoder('utf-8');
@@ -152,22 +152,24 @@ const Dashboard = () => {
         decoder = new TextDecoder('euc-kr');
         csvText = decoder.decode(buffer);
       }
+
+      if (csvText.trim().startsWith('<')) return null;
+
       return parseCSV(csvText);
     } catch (e) {
       return null;
     }
   };
 
-  // ✨ 존재하는 데이터 동적 파싱 로직 적용
   useEffect(() => {
     const probeAndLoadYears = async () => {
-      const yearsToTry = [2022, 2023, 2024, 2025, 2026, 2027, 2028]; // 탐색할 년도 범위
+      const yearsToTry = [2022, 2023, 2024, 2025, 2026, 2027, 2028]; 
       const valid = [];
       const cacheUpdate = {};
 
       for (const y of yearsToTry) {
         const result = await fetchCSVData(`/data/top/${y}data.csv`);
-        if (result) {
+        if (result && Object.keys(result.dataMap).length > 0) {
           valid.push(y);
           cacheUpdate[y] = result;
         }
@@ -176,7 +178,7 @@ const Dashboard = () => {
       if (valid.length > 0) {
         setNationalDataCache(prev => ({ ...prev, ...cacheUpdate }));
         setAvailableYears(valid);
-        setSelectedYear(valid[valid.length - 1]); // 발견된 최신 연도로 초기화
+        setSelectedYear(valid[valid.length - 1]); 
       }
     };
     probeAndLoadYears();
@@ -198,6 +200,52 @@ const Dashboard = () => {
     }
   }, [mapView, selectedRegion, selectedYear]);
 
+  // ✨ [추가] CSV 다운로드 처리 함수
+  const handleDownload = async () => {
+    if (!selectedYear) {
+      alert("선택된 년도 데이터가 없습니다.");
+      return;
+    }
+
+    // 현재 지도 상태에 따라 다운로드 경로 설정
+    let downloadUrl = '';
+    let fileName = '';
+
+    if (mapView === 'national') {
+      downloadUrl = `/data/top/${selectedYear}data.csv`;
+      fileName = `전국_${selectedYear}년_데이터.csv`;
+    } else {
+      const engName = regionFolderMapping[selectedRegion];
+      downloadUrl = `/data/${engName}/${selectedYear}data.csv`;
+      fileName = `${selectedRegion}_${selectedYear}년_데이터.csv`;
+    }
+
+    try {
+      // 파일이 실제로 존재하는지 확인 (HEAD 요청)
+      const res = await fetch(downloadUrl, { method: 'HEAD' });
+      
+      // 로컬 개발서버에서 404대신 index.html을 반환하는 경우 방어
+      const contentType = res.headers.get('content-type');
+      if (!res.ok || (contentType && contentType.includes('text/html'))) {
+        alert("해당 년도의 지역 데이터가 존재하지 않습니다.");
+        return;
+      }
+
+      // 앵커 태그를 생성하여 브라우저 다운로드 트리거
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName; // 다운로드 파일명 지정
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+    } catch (error) {
+      console.error("다운로드 에러:", error);
+      alert("다운로드 중 오류가 발생했습니다. 데이터가 존재하지 않을 수 있습니다.");
+    }
+  };
+
+
   const handleProvinceClick = (geo) => {
     const provNameFull = geo.properties.name;
     const shortName = nameMapping[provNameFull] || provNameFull;
@@ -205,7 +253,7 @@ const Dashboard = () => {
 
     setSelectedRegion(shortName);
     setSelectedMunicipality(null);
-    setHoveredRegion(null); // 줌인 시 호버링 초기화
+    setHoveredRegion(null); 
 
     if (config) {
       setMapCenter(config.center);
@@ -227,10 +275,9 @@ const Dashboard = () => {
     setSelectedProvCode(null);
     setMapView('national');
     setSelectedMunicipality(null);
-    setHoveredMunicipality(null); // 줌아웃 시 호버링 초기화
+    setHoveredMunicipality(null); 
   };
 
-  // 데이터 추출
   const currentNational = nationalDataCache[selectedYear] || { totals: {}, dataMap: {} };
   let currentMapData = {};
   let currentTotals = {};
@@ -246,7 +293,6 @@ const Dashboard = () => {
     currentTotals = muniData.totals;
   }
 
-  // 지표 최대/최소
   let metricMin = Infinity;
   let metricMax = -Infinity;
   Object.values(currentMapData).forEach(d => {
@@ -278,7 +324,6 @@ const Dashboard = () => {
     };
   });
 
-  // ✨ Hover 및 선택 상태를 조합하여 상세 패널 데이터 결정
   let rightColData = null;
   let targetName = '';
 
@@ -293,7 +338,6 @@ const Dashboard = () => {
       rightColData = coloredMapData[targetMuni];
     } else {
       targetName = `${selectedRegion} 전체`;
-      // 시군구를 선택/호버링 안한 경우, 해당 시도의 전체 데이터를 national 캐시에서 가져옴
       const parentData = currentNational.dataMap[selectedRegion];
       if (parentData) {
         rightColData = { 
@@ -307,7 +351,6 @@ const Dashboard = () => {
 
   const displayData = rightColData || { color: '#94A3B8', displayValue: '-' };
 
-  // Top 5 추출
   const topRegions = Object.entries(coloredMapData)
     .filter(([_, v]) => v[currentMetric.id] !== null && v[currentMetric.id] !== undefined)
     .sort((a, b) => b[1][currentMetric.id] - a[1][currentMetric.id])
@@ -325,20 +368,41 @@ const Dashboard = () => {
         </div>
         <nav className="nav-menu">
           <div className="nav-item active">대시보드</div>
-          <div className="nav-item">지도 보기</div>
+          {/* <div className="nav-item">지도 보기</div>
           <div className="nav-item">지역 분석</div>
-          <div className="nav-item">재난 위험 분석</div>
-          <div className="nav-item">데이터 다운로드</div>
+          <div className="nav-item">재난 위험 분석</div> */}
+          {/* ✨ [적용] 다운로드 클릭 이벤트 바인딩 */}
+          <div className="nav-item" onClick={handleDownload} style={{ cursor: 'pointer' }}>데이터 다운로드</div>
         </nav>
       </aside>
 
       <div className="main-area">
         <header className="header">
           <div className="header-left">
-            {/* 존재하는 년도만 옵션으로 노출 */}
             {availableYears.length > 0 ? (
-              <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} style={{ fontWeight: 'bold' }}>
-                {availableYears.slice().reverse().map(y => <option key={y} value={y}>{y}년 데이터</option>)}
+              <select 
+                value={selectedYear} 
+                onChange={(e) => setSelectedYear(Number(e.target.value))} 
+                style={{ 
+                  fontWeight: 'bold', 
+                  backgroundColor: '#1C2B44',
+                  color: '#FFFFFF',
+                  border: '1px solid rgba(255, 255, 255, 0.3)',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                {availableYears.slice().reverse().map(y => (
+                  <option 
+                    key={y} 
+                    value={y} 
+                    style={{ color: '#1F2937', backgroundColor: '#FFFFFF' }}
+                  >
+                    {y}년 데이터
+                  </option>
+                ))}
               </select>
             ) : (
               <span style={{ fontWeight: 'bold', color: '#94A3B8' }}>데이터 로딩중...</span>
@@ -427,8 +491,8 @@ const Dashboard = () => {
                                   key={geo.rsmKey}
                                   geography={geo}
                                   onClick={() => handleProvinceClick(geo)}
-                                  onMouseEnter={() => setHoveredRegion(shortName)} // ✨ 마우스 호버 감지 추가
-                                  onMouseLeave={() => setHoveredRegion(null)}       // ✨ 호버 해제 추가
+                                  onMouseEnter={() => setHoveredRegion(shortName)}
+                                  onMouseLeave={() => setHoveredRegion(null)}
                                   className="geography-path"
                                   style={{
                                     default: { fill: d ? d.color : "#94A3B8", stroke: "#1C2B44", strokeWidth: 0.5, outline: "none" },
@@ -456,10 +520,10 @@ const Dashboard = () => {
                                   key={geo.rsmKey}
                                   geography={geo}
                                   onClick={() => handleMunicipalityClick(geo)}
-                                  onMouseEnter={() => { // ✨ 시군구 마우스 호버 감지 추가
+                                  onMouseEnter={() => {
                                     if (isSelectedProv) setHoveredMunicipality(geo.properties.name);
                                   }}
-                                  onMouseLeave={() => setHoveredMunicipality(null)} // ✨ 호버 해제 추가
+                                  onMouseLeave={() => setHoveredMunicipality(null)}
                                   className="geography-path"
                                   style={{
                                     default: {
@@ -506,7 +570,6 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              {/* ✨ 인라인 스타일 추가로 가로 길이 최대화 (width: 100%, display: block) */}
               <div className="bottom-charts-row" style={{ display: 'block', width: '100%', marginTop: '20px' }}>
                 <div className="chart-card" style={{ width: '100%' }}>
                   <h3>{currentMetric.label} TOP 5 ({selectedYear}년)</h3>
