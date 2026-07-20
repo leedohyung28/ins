@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from "react-simple-maps";
 import './Dashboard.css';
 
@@ -6,7 +6,6 @@ import './Dashboard.css';
 const KOREA_PROVINCE_URL = "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2013/json/skorea_provinces_geo_simple.json";
 const KOREA_MUNI_URL = "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2013/json/skorea_municipalities_geo_simple.json";
 
-// GeoJSON의 정식 명칭을 축약 명칭과 매핑
 const nameMapping = {
   '서울특별시': '서울', '부산광역시': '부산', '대구광역시': '대구', '인천광역시': '인천',
   '광주광역시': '광주', '대전광역시': '대전', '울산광역시': '울산', '세종특별자치시': '세종',
@@ -14,12 +13,11 @@ const nameMapping = {
   '전라북도': '전북', '전라남도': '전남', '경상북도': '경북', '경상남도': '경남', '제주특별자치도': '제주'
 };
 
-// 폴더 경로명 매핑
 const regionFolderMapping = {
   '서울': 'seoul', '인천': 'incheon', '부산': 'busan', '울산': 'ulsan', 
   '대구': 'dague', '광주': 'gwangju', '대전': 'dajeon', '세종': 'sejong', 
-  '경기': 'kyungki', '강원': 'kangwon', '충북': 'chungbuk', '충남': 'chungnam', 
-  '전북': 'jeonbuk', '전남': 'jeonnam', '경북': 'kyungbuk', '경남': 'kyungnam', '제주': 'jeju'
+  '경기': 'kyungki', '강원': 'gangwon', '충북': 'chungbuk', '충남': 'chungnam', 
+  '전북': 'jeonbuk', '전남': 'jeonnam', '경북': 'gyungbuk', '경남': 'gyungnam', '제주': 'jeju'
 };
 
 const PROVINCE_MAP_CONFIG = {
@@ -43,11 +41,9 @@ const PROVINCE_MAP_CONFIG = {
 };
 
 const METRICS = [
-  { id: 'housing', label: '주택(건)', unit: '건' },
-  { id: 'housingZ', label: '주택(Z값)', unit: '' },
-  { id: 'greenhouse', label: '온실(m²)', unit: 'm²' },
-  { id: 'greenhouseZ', label: '온실(Z값)', unit: '' },
-  { id: 'smallbiz', label: '소상공인(건)', unit: '건' },
+  { id: 'damage', label: '우심피해액(원)', unit: '원' }, 
+  { id: 'housing', label: '주택 보험 가입 현황(건)', unit: '건' },
+  { id: 'housingZ', label: '주택 보험 가입 현황(Z값)', unit: '' },
   { id: 'population', label: '인구수(건)', unit: '명' },
 ];
 
@@ -79,28 +75,33 @@ const parseCSVLine = (line) => {
 
 const parseCSV = (csvText) => {
   const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (lines.length < 3) return null;
+  if (lines.length < 2) return null;
 
-  const totalCols = parseCSVLine(lines[1]);
-  const totals = {
-    housing: parseVal(totalCols[1]),
-    housingZ: parseVal(totalCols[2]),
-    greenhouse: parseVal(totalCols[3]),
-    greenhouseZ: parseVal(totalCols[4]),
-    smallbiz: parseVal(totalCols[5]),
-    population: parseVal(totalCols[6]),
-  };
-
+  let totals = { housing: null, housingZ: null, greenhouse: null, greenhouseZ: null, smallbiz: null, population: null, damage: null };
   const dataMap = {};
-  for (let i = 2; i < lines.length; i++) {
+
+  for (let i = 0; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
-    if (cols.length < 7) continue;
+    if (cols.length < 8) continue;
     
     const regionName = cols[0].replace(/\s/g, '');
-    if (!regionName || regionName === '평균' || regionName === '표준편차' || regionName === 'NaN') {
-      break; 
+    if (regionName === '0' || regionName === 'NaN' || regionName.includes('주택')) continue;
+
+    if (regionName === '합계') {
+      totals = {
+        housing: parseVal(cols[1]),
+        housingZ: parseVal(cols[2]),
+        greenhouse: parseVal(cols[3]),
+        greenhouseZ: parseVal(cols[4]),
+        smallbiz: parseVal(cols[5]),
+        population: parseVal(cols[6]),
+        damage: parseVal(cols[7]), 
+      };
+      continue;
     }
-    
+
+    if (!regionName || regionName === '평균' || regionName === '표준편차') continue;
+
     dataMap[regionName] = {
       housing: parseVal(cols[1]),
       housingZ: parseVal(cols[2]),
@@ -108,13 +109,13 @@ const parseCSV = (csvText) => {
       greenhouseZ: parseVal(cols[4]),
       smallbiz: parseVal(cols[5]),
       population: parseVal(cols[6]),
+      damage: parseVal(cols[7]), 
     };
   }
 
   return { totals, dataMap };
 };
 
-// 두 헥스(Hex) 색상 간의 혼합을 계산하는 함수
 const interpolateColor = (color1, color2, factor) => {
   const hex1 = color1.replace('#', '');
   const hex2 = color2.replace('#', '');
@@ -134,32 +135,54 @@ const interpolateColor = (color1, color2, factor) => {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
 };
 
-// 0~1 사이의 비율에 따라 다중 그라데이션 색상을 반환하는 함수
 const getGradientColor = (ratio) => {
-  // 매우 낮음(다크그린) -> 매우 높음(레드)
   const stops = ['#15803D', '#84CC16', '#EAB308', '#F97316', '#EF4444']; 
   if (ratio <= 0) return stops[0];
   if (ratio >= 1) return stops[stops.length - 1];
   
-  const scaled = ratio * (stops.length - 1); // 0 ~ 4
-  const index = Math.floor(scaled);          // 0, 1, 2, 3
-  const factor = scaled - index;             // 소수점 (혼합 비율)
+  const scaled = ratio * (stops.length - 1); 
+  const index = Math.floor(scaled);          
+  const factor = scaled - index;             
   
   return interpolateColor(stops[index], stops[index + 1], factor);
 };
 
-// 환경에 따른 안전한 베이스 URL 추출
 const getBaseUrl = () => {
   return process.env.PUBLIC_URL || '';
 };
 
+const TypewriterEffect = ({ text, delay = 50 }) => {
+  const [currentText, setCurrentText] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    setCurrentText('');
+    setCurrentIndex(0);
+  }, [text]);
+
+  useEffect(() => {
+    if (currentIndex < text.length) {
+      const timeout = setTimeout(() => {
+        setCurrentText(prevText => prevText + text[currentIndex]);
+        setCurrentIndex(prevIndex => prevIndex + 1);
+      }, delay);
+      return () => clearTimeout(timeout);
+    }
+  }, [currentIndex, delay, text]);
+
+  return <span>{currentText}</span>;
+};
+
+
 const Dashboard = () => {
-  const [availableYears, setAvailableYears] = useState([]);
-  const [selectedYear, setSelectedYear] = useState(''); 
+  // ✨ [추가] 네비게이션 탭 상태 추가 ('dashboard' | 'analysis')
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  const [availableYears, setAvailableYears] = useState([2024, 2025, 2026]);
+  const [selectedYear, setSelectedYear] = useState(2026); 
   
   const [selectedRegion, setSelectedRegion] = useState('서울');
   const [selectedMunicipality, setSelectedMunicipality] = useState(null); 
-
   const [hoveredRegion, setHoveredRegion] = useState(null);
   const [hoveredMunicipality, setHoveredMunicipality] = useState(null);
 
@@ -176,6 +199,15 @@ const Dashboard = () => {
 
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+
+  const [isInsightLoading, setIsInsightLoading] = useState(false);
+  const [insightText, setInsightText] = useState('');
+
+  // ✨ [추가] 듀얼 맵 분석용 독립 상태 (A맵, B맵)
+  const [selectedMetricIdxA, setSelectedMetricIdxA] = useState(0);
+  const [selectedMetricIdxB, setSelectedMetricIdxB] = useState(1);
+  const [checkedRangesA, setCheckedRangesA] = useState([]); // ex: [0, 1] (0~20%, 20~40%)
+  const [checkedRangesB, setCheckedRangesB] = useState([]);
 
   const fetchCSVData = async (url) => {
     try {
@@ -219,9 +251,6 @@ const Dashboard = () => {
 
       for (const y of yearsToTry) {
         const result = await fetchCSVData(`${baseUrl}/data/top/${y}data.csv`);
-
-        console.log(`[${y}년] 현재 요청 경로:`, result);
-
         if (result && Object.keys(result.dataMap).length > 0) {
           valid.push(y);
           cacheUpdate[y] = result;
@@ -240,6 +269,17 @@ const Dashboard = () => {
     };
     probeAndLoadYears();
   }, []);
+
+  useEffect(() => {
+    if (selectedYear && !nationalDataCache[selectedYear]) {
+      const baseUrl = getBaseUrl();
+      fetchCSVData(`${baseUrl}/data/top/${selectedYear}data.csv`).then(result => {
+        if (result && Object.keys(result.dataMap).length > 0) {
+          setNationalDataCache(prev => ({ ...prev, [selectedYear]: result }));
+        }
+      });
+    }
+  }, [selectedYear]);
 
   useEffect(() => {
     if (mapView === 'province' && selectedRegion && selectedYear) {
@@ -330,6 +370,8 @@ const Dashboard = () => {
     setHoveredMunicipality(null); 
   };
 
+
+  // ✨ 데이터 처리 공통 로직
   const currentNational = nationalDataCache[selectedYear] || { totals: {}, dataMap: {} };
   let currentMapData = {};
   let currentTotals = {};
@@ -345,34 +387,69 @@ const Dashboard = () => {
     currentTotals = muniData.totals;
   }
 
-  let metricMin = Infinity;
-  let metricMax = -Infinity;
-  Object.values(currentMapData).forEach(d => {
-    const val = d[currentMetric.id];
-    if (val !== null && val !== undefined) {
-      if (val < metricMin) metricMin = val;
-      if (val > metricMax) metricMax = val;
-    }
-  });
-
-  const getColor = (val) => {
-    if (val === null || val === undefined) return '#94A3B8'; // 데이터 없음
-    if (metricMin === metricMax) return '#EAB308';           // 값이 모두 같을 때
+  // ✨ [추가] 범용적으로 데이터를 처리하고 색상을 입히는 함수 (체크박스 필터링 포함)
+  const processMapData = (metricId, checkedRanges) => {
+    let min = Infinity;
+    let max = -Infinity;
     
-    // 0 ~ 1 사이의 비율 계산 후 그라데이션 색상 가져오기
-    const ratio = Math.max(0, Math.min(1, (val - metricMin) / (metricMax - metricMin)));
-    return getGradientColor(ratio);
+    Object.values(currentMapData).forEach(d => {
+      const val = d[metricId];
+      if (val !== null && val !== undefined) {
+        if (val < min) min = val;
+        if (val > max) max = val;
+      }
+    });
+
+    const getFilterColor = (val, ratio) => {
+      if (val === null || val === undefined) return '#94A3B8';
+      
+      // 체크된 범위가 없으면 기존 그라데이션 반환
+      if (checkedRanges.length === 0) {
+        if (min === max) return '#EAB308';
+        return getGradientColor(ratio);
+      }
+
+      // 0~4 인덱스 산출 (0~20%, 20~40%, 40~60%, 60~80%, 80~100%)
+      const rangeIndex = Math.min(4, Math.floor(ratio * 5)); 
+      
+      if (checkedRanges.includes(rangeIndex)) {
+        const stops = ['#15803D', '#84CC16', '#EAB308', '#F97316', '#EF4444'];
+        return stops[rangeIndex];
+      }
+      return '#E2E8F0'; // 범위 밖 데이터는 회색
+    };
+
+    const processedData = {};
+    const filteredRegions = []; // 선택된 구간에 포함된 지역 리스트 수집
+
+    Object.keys(currentMapData).forEach(region => {
+      const val = currentMapData[region][metricId];
+      const ratio = min === max ? 0 : Math.max(0, Math.min(1, (val - min) / (max - min)));
+      const color = getFilterColor(val, ratio);
+      
+      if (checkedRanges.length > 0 && color !== '#E2E8F0' && color !== '#94A3B8') {
+        filteredRegions.push(region);
+      }
+
+      processedData[region] = {
+        ...currentMapData[region],
+        color,
+        displayValue: val !== null && val !== undefined ? val : '-',
+        ratio
+      };
+    });
+
+    return { processedData, min, max, filteredRegions };
   };
 
-  const coloredMapData = {};
-  Object.keys(currentMapData).forEach(region => {
-    const val = currentMapData[region][currentMetric.id];
-    coloredMapData[region] = {
-      ...currentMapData[region],
-      color: getColor(val),
-      displayValue: val !== null && val !== undefined ? val : '-'
-    };
-  });
+  // 대시보드 뷰 데이터
+  const dashboardMapData = processMapData(currentMetric.id, []).processedData;
+  const dashboardMin = processMapData(currentMetric.id, []).min;
+  const dashboardMax = processMapData(currentMetric.id, []).max;
+
+  // 분석 뷰 데이터
+  const mapDataA = processMapData(METRICS[selectedMetricIdxA].id, checkedRangesA);
+  const mapDataB = processMapData(METRICS[selectedMetricIdxB].id, checkedRangesB);
 
   let rightColData = null;
   let targetName = '';
@@ -380,12 +457,12 @@ const Dashboard = () => {
   if (mapView === 'national') {
     const targetReg = hoveredRegion || selectedRegion;
     targetName = targetReg;
-    rightColData = coloredMapData[targetReg];
+    rightColData = dashboardMapData[targetReg];
   } else {
     const targetMuni = hoveredMunicipality || selectedMunicipality;
     if (targetMuni) {
       targetName = targetMuni;
-      rightColData = coloredMapData[targetMuni];
+      rightColData = dashboardMapData[targetMuni];
     } else {
       targetName = `${selectedRegion} 전체`;
       const parentData = currentNational.dataMap[selectedRegion];
@@ -401,13 +478,175 @@ const Dashboard = () => {
 
   const displayData = rightColData || { color: '#94A3B8', displayValue: '-' };
 
-  const topRegions = Object.entries(coloredMapData)
+  const topRegions = Object.entries(dashboardMapData)
     .filter(([_, v]) => v[currentMetric.id] !== null && v[currentMetric.id] !== undefined)
     .sort((a, b) => b[1][currentMetric.id] - a[1][currentMetric.id])
     .slice(0, 5);
 
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      setIsInsightLoading(true);
+      setInsightText('');
+
+      const timer = setTimeout(() => {
+        setIsInsightLoading(false);
+        setInsightText(`선택하신 ${targetName}의 ${selectedYear || '-'}년 기준 상세 지표 현황입니다. 지도 아래의 슬라이더를 통해 항목을 변경하여 직관적인 분포도를 확인할 수 있습니다.`);
+      }, 2000); 
+
+      return () => clearTimeout(timer);
+    }
+  }, [targetName, selectedYear, activeTab]);
+
+  const handleCheckboxToggle = (mapType, rangeIndex) => {
+    if (mapType === 'A') {
+      setCheckedRangesA(prev => prev.includes(rangeIndex) ? prev.filter(r => r !== rangeIndex) : [...prev, rangeIndex]);
+    } else {
+      setCheckedRangesB(prev => prev.includes(rangeIndex) ? prev.filter(r => r !== rangeIndex) : [...prev, rangeIndex]);
+    }
+  };
+
+  // ✨ [추가] 듀얼 맵 분석 레이아웃 렌더링 함수
+  const renderAnalysisView = () => {
+    const renderMap = (mapType, mapDataObj, metricIdx, setMetricIdx, checkedRanges) => {
+      const metric = METRICS[metricIdx];
+      
+      return (
+        <div className="map-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: 'auto', minHeight: '650px', padding: '16px' }}>
+          <h3 style={{ marginBottom: '16px', fontSize: '15px' }}>{metric.label} 분포 분석</h3>
+          
+          {mapView === 'province' && (
+            <button className="map-back-btn" onClick={handleResetMap} style={{ top: '16px', right: '16px' }}>
+              ← 전국 지도
+            </button>
+          )}
+
+          <div style={{ flex: 1, position: 'relative' }}>
+            <ComposableMap 
+              projection="geoMercator" 
+              projectionConfig={{ scale: 4500, center: [127.5, 36] }}
+              style={{ width: "100%", height: "100%", backgroundColor: "transparent" }}
+            >
+              <ZoomableGroup center={mapCenter} zoom={mapZoom} disablePanning>
+                <Geographies geography={mapView === 'national' ? KOREA_PROVINCE_URL : KOREA_MUNI_URL}>
+                  {({ geographies }) =>
+                    geographies.map((geo) => {
+                      const name = mapView === 'national' 
+                        ? (nameMapping[geo.properties.name] || geo.properties.name)
+                        : geo.properties.name;
+                      
+                      const isSelectedProv = mapView === 'province' ? geo.properties.code.startsWith(selectedProvCode) : true;
+                      const d = mapDataObj.processedData[name];
+
+                      let fillStr = "#1F2937";
+                      if (mapView === 'national') {
+                        fillStr = d ? d.color : "#94A3B8";
+                      } else {
+                        fillStr = isSelectedProv ? (d ? d.color : "#94A3B8") : "#1F2937";
+                      }
+
+                      return (
+                        <Geography
+                          key={geo.rsmKey}
+                          geography={geo}
+                          onClick={() => mapView === 'national' ? handleProvinceClick(geo) : null}
+                          className="geography-path"
+                          style={{
+                            default: { fill: fillStr, stroke: "#1C2B44", strokeWidth: mapView === 'national' ? 0.5 : (isSelectedProv ? 0.3 : 0.1), outline: "none" },
+                            hover: { fill: (mapView === 'national' || isSelectedProv) ? "#3B82F6" : "#1F2937", cursor: (mapView === 'national' || isSelectedProv) ? "pointer" : "default", outline: "none" },
+                            pressed: { fill: "#2563EB", outline: "none" },
+                          }}
+                          title={name}
+                        />
+                      );
+                    })
+                  }
+                </Geographies>
+              </ZoomableGroup>
+            </ComposableMap>
+          </div>
+
+          {/* 슬라이더 컨트롤 */}
+          <div style={{ marginTop: '16px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+            <div style={{ position: 'relative', width: '100%', height: '36px', backgroundColor: '#1E293B', borderRadius: '8px', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <div style={{
+                position: 'absolute', height: '28px', width: `${100 / METRICS.length}%`,
+                backgroundColor: '#3B82F6', borderRadius: '6px',
+                left: `${(metricIdx / METRICS.length) * 100}%`, transition: 'left 0.3s'
+              }} />
+              {METRICS.map((m, idx) => (
+                <div key={m.id} onClick={() => setMetricIdx(idx)} style={{ flex: 1, textAlign: 'center', zIndex: 1, fontSize: '11px', fontWeight: metricIdx === idx ? 'bold' : 'normal', color: metricIdx === idx ? '#FFFFFF' : '#94A3B8' }}>
+                  {m.label.split('(')[0]}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 체크박스 구간 필터 컨트롤 */}
+          <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '8px' }}>
+            <p style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>분포 구간 선택 필터링</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+              {[
+                { label: '0~20% (낮음)', color: '#15803D' },
+                { label: '20~40%', color: '#84CC16' },
+                { label: '40~60%', color: '#EAB308' },
+                { label: '60~80%', color: '#F97316' },
+                { label: '80~100% (높음)', color: '#EF4444' }
+              ].map((range, idx) => (
+                <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={checkedRanges.includes(idx)}
+                    onChange={() => handleCheckboxToggle(mapType, idx)}
+                    style={{ accentColor: range.color }}
+                  />
+                  <span style={{ color: checkedRanges.includes(idx) ? '#FFF' : '#94A3B8' }}>
+                    <span style={{ display:'inline-block', width:'8px', height:'8px', backgroundColor: range.color, marginRight:'4px', borderRadius:'2px' }}></span>
+                    {range.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* 필터링된 지역 리스트 박스 */}
+          <div style={{ 
+            marginTop: '12px', padding: '12px', minHeight: '60px', 
+            backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: '8px',
+            fontSize: '12px', color: '#CBD5E1', lineHeight: '1.6'
+          }}>
+            <strong style={{ color: '#FFF', display: 'block', marginBottom: '4px' }}>필터링된 지역 결과:</strong>
+            {checkedRanges.length === 0 ? (
+              <span style={{ color: '#64748B' }}>체크박스를 선택하여 해당 구간의 지역을 확인하세요.</span>
+            ) : mapDataObj.filteredRegions.length > 0 ? (
+              mapDataObj.filteredRegions.join(', ')
+            ) : (
+              <span style={{ color: '#EF4444' }}>해당 구간에 속하는 지역이 없습니다.</span>
+            )}
+          </div>
+
+        </div>
+      );
+    };
+
+    return (
+      <div style={{ display: 'flex', gap: '20px', width: '100%', height: '100%' }}>
+        {renderMap('A', mapDataA, selectedMetricIdxA, setSelectedMetricIdxA, checkedRangesA)}
+        {renderMap('B', mapDataB, selectedMetricIdxB, setSelectedMetricIdxB, checkedRangesB)}
+      </div>
+    );
+  };
+
   return (
     <div className="dashboard-layout">
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
+      
       <aside className="sidebar">
         <div className="sidebar-logo">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -417,7 +656,9 @@ const Dashboard = () => {
           </div>
         </div>
         <nav className="nav-menu">
-          <div className="nav-item active">대시보드</div>
+          <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')} style={{ cursor: 'pointer' }}>대시보드</div>
+          {/* ✨ [추가] 보험보장공백 분석 메뉴 탭 추가 */}
+          <div className={`nav-item ${activeTab === 'analysis' ? 'active' : ''}`} onClick={() => setActiveTab('analysis')} style={{ cursor: 'pointer' }}>보험보장공백 분석</div>
           <div className="nav-item" onClick={handleDownload} style={{ cursor: 'pointer' }}>데이터 다운로드</div>
         </nav>
       </aside>
@@ -462,257 +703,300 @@ const Dashboard = () => {
           </div>
         </header>
 
-        <main className="content-wrapper">
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-icon" style={{color: '#3B82F6'}}>🏠</div>
-              <div className="stat-info">
-                <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 주택건수</p>
-                <h2>{currentTotals.housing !== null && currentTotals.housing !== undefined ? currentTotals.housing.toLocaleString() : '-'} <span>건</span></h2>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon" style={{color: '#10B981'}}>🌱</div>
-              <div className="stat-info">
-                <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 온실 면적</p>
-                <h2>{currentTotals.greenhouse !== null && currentTotals.greenhouse !== undefined ? currentTotals.greenhouse.toLocaleString() : '-'} <span>m²</span></h2>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon" style={{color: '#F97316'}}>🏪</div>
-              <div className="stat-info">
-                <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 소상공인</p>
-                <h2>{currentTotals.smallbiz !== null && currentTotals.smallbiz !== undefined ? currentTotals.smallbiz.toLocaleString() : '-'} <span>건</span></h2>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon" style={{color: '#8B5CF6'}}>👥</div>
-              <div className="stat-info">
-                <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 인구수</p>
-                <h2>{currentTotals.population !== null && currentTotals.population !== undefined ? currentTotals.population.toLocaleString() : '-'} <span>명</span></h2>
-              </div>
-            </div>
-          </div>
-
-          <div className="main-content-grid">
-            <div className="left-column">
-              <div className="map-card" style={{ overflow: 'hidden', height: 'auto', minHeight: '500px' }}>
-                <h3>
-                  {selectedYear || '-'}년 지역별 지표 현황 ⓘ 
-                  <span style={{fontSize:'12px', color:'#94A3B8', marginLeft:'8px'}}>
-                    {mapView === 'national' ? '(시/도를 클릭하여 줌인하세요)' : '(시/군/구를 클릭하여 상세 조회하세요)'}
-                  </span>
-                </h3>
+        <main className="content-wrapper" style={{ overflowY: 'auto' }}>
+          
+          {/* ✨ 활성화된 탭에 따라 화면 전환 */}
+          {activeTab === 'analysis' ? (
+            renderAnalysisView()
+          ) : (
+            <>
+              {/* 기존 대시보드 뷰 시작 */}
+              <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
                 
-                {mapView === 'province' && (
-                  <button className="map-back-btn" onClick={handleResetMap}>
-                    ← 전국 지도로 돌아가기
-                  </button>
-                )}
-
-                <div className="map-legend">
-                  <p style={{marginBottom: '8px', fontWeight: 'bold'}}>{currentMetric.label} 분포</p>
-                  
-                  {/* 그라데이션 라벨 */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94A3B8', marginBottom: '4px' }}>
-                    <span>낮음</span>
-                    <span>높음</span>
-                  </div>
-                  
-                  {/* 연속된 색상 바 */}
-                  <div style={{
-                    height: '12px',
-                    background: 'linear-gradient(to right, #15803D, #84CC16, #EAB308, #F97316, #EF4444)',
-                    borderRadius: '6px',
-                    marginBottom: '8px'
-                  }}></div>
-                  
-                  {/* 데이터 없음 항목은 별도 표시 */}
-                  <div className="legend-item" style={{ marginTop: '12px' }}>
-                    <div className="legend-color" style={{background: '#94A3B8'}}></div> 데이터 없음
+                <div className="stat-card">
+                  <div className="stat-icon" style={{color: '#8B5CF6'}}>👥</div>
+                  <div className="stat-info">
+                    <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 인구수</p>
+                    <h2>{currentTotals.population !== null && currentTotals.population !== undefined ? currentTotals.population.toLocaleString() : '-'} <span>명</span></h2>
                   </div>
                 </div>
 
-                <div style={{ width: '100%', height: '400px' }}>
-                  <ComposableMap 
-                    projection="geoMercator" 
-                    projectionConfig={{ scale: 4500, center: [127.5, 36] }}
-                    style={{ width: "100%", height: "100%", backgroundColor: "transparent" }}
-                  >
-                    <ZoomableGroup center={mapCenter} zoom={mapZoom} disablePanning>
-                      
-                      {mapView === 'national' && (
-                        <Geographies geography={KOREA_PROVINCE_URL}>
-                          {({ geographies }) =>
-                            geographies.map((geo) => {
-                              const shortName = nameMapping[geo.properties.name] || geo.properties.name;
-                              const d = coloredMapData[shortName];
-                              return (
-                                <Geography
-                                  key={geo.rsmKey}
-                                  geography={geo}
-                                  onClick={() => handleProvinceClick(geo)}
-                                  onMouseEnter={() => setHoveredRegion(shortName)}
-                                  onMouseLeave={() => setHoveredRegion(null)}
-                                  className="geography-path"
-                                  style={{
-                                    default: { fill: d ? d.color : "#94A3B8", stroke: "#1C2B44", strokeWidth: 0.5, outline: "none" },
-                                    hover: { fill: "#3B82F6", stroke: "#FFF", strokeWidth: 1, cursor: "pointer", outline: "none" },
-                                    pressed: { fill: "#2563EB", outline: "none" },
-                                  }}
-                                  title={`${geo.properties.name} (클릭하여 줌인)`}
-                                />
-                              );
-                            })
-                          }
-                        </Geographies>
-                      )}
-
-                      {mapView === 'province' && (
-                        <Geographies geography={KOREA_MUNI_URL}>
-                          {({ geographies }) =>
-                            geographies.map((geo) => {
-                              const isSelectedProv = geo.properties.code.startsWith(selectedProvCode);
-                              const isClickedMuni = selectedMunicipality === geo.properties.name;
-                              const d = coloredMapData[geo.properties.name]; 
-
-                              return (
-                                <Geography
-                                  key={geo.rsmKey}
-                                  geography={geo}
-                                  onClick={() => handleMunicipalityClick(geo)}
-                                  onMouseEnter={() => {
-                                    if (isSelectedProv) setHoveredMunicipality(geo.properties.name);
-                                  }}
-                                  onMouseLeave={() => setHoveredMunicipality(null)}
-                                  className="geography-path"
-                                  style={{
-                                    default: {
-                                      fill: isSelectedProv ? (d ? d.color : "#94A3B8") : "#1F2937",
-                                      stroke: isSelectedProv ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.05)",
-                                      strokeWidth: isSelectedProv ? (isClickedMuni ? 2 : 0.3) : 0.1,
-                                      outline: "none"
-                                    },
-                                    hover: { 
-                                      fill: isSelectedProv ? (d ? "#3B82F6" : "#4B5563") : "#1F2937", 
-                                      cursor: isSelectedProv ? "pointer" : "default",
-                                      outline: "none" 
-                                    },
-                                    pressed: { fill: "#2563EB", outline: "none" },
-                                  }}
-                                  title={isSelectedProv ? geo.properties.name : ""}
-                                />
-                              );
-                            })
-                          }
-                        </Geographies>
-                      )}
-                    </ZoomableGroup>
-                  </ComposableMap>
+                <div className="stat-card">
+                  <div className="stat-icon" style={{color: '#EF4444'}}>🚨</div>
+                  <div className="stat-info">
+                    <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 우심피해액</p>
+                    <h2>{currentTotals.damage !== null && currentTotals.damage !== undefined ? currentTotals.damage.toLocaleString() : '-'} <span>원</span></h2>
+                  </div>
                 </div>
+                
+                <div className="stat-card">
+                  <div className="stat-icon" style={{color: '#3B82F6'}}>🏠</div>
+                  <div className="stat-info">
+                    <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 주택 보험 가입 현황</p>
+                    <h2>{currentTotals.housing !== null && currentTotals.housing !== undefined ? currentTotals.housing.toLocaleString() : '-'} <span>건</span></h2>
+                  </div>
+                </div>
+              </div>
 
-                <div style={{ marginTop: '20px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                  <p style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 'bold' }}>지도 표시 지표 선택 : <span style={{color: '#3B82F6'}}>{currentMetric.label}</span></p>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max={METRICS.length - 1} 
-                    value={selectedMetricIdx} 
-                    onChange={(e) => setSelectedMetricIdx(Number(e.target.value))}
-                    style={{ width: '100%', cursor: 'pointer' }}
-                  />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '12px', color: '#94A3B8' }}>
-                    {METRICS.map((m, idx) => (
-                      <span key={m.id} onClick={() => setSelectedMetricIdx(idx)} style={{ cursor: 'pointer', color: selectedMetricIdx === idx ? '#FFF' : 'inherit', fontWeight: selectedMetricIdx === idx ? 'bold' : 'normal' }}>
-                        {m.label}
+              <div className="main-content-grid">
+                <div className="left-column">
+                  <div className="map-card" style={{ overflow: 'hidden', height: 'auto', minHeight: '500px' }}>
+                    <h3>
+                      {selectedYear || '-'}년 지역별 지표 현황 ⓘ 
+                      <span style={{fontSize:'12px', color:'#94A3B8', marginLeft:'8px'}}>
+                        {mapView === 'national' ? '(시/도를 클릭하여 줌인하세요)' : '(시/군/구를 클릭하여 상세 조회하세요)'}
                       </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="bottom-charts-row" style={{ display: 'block', width: '100%', marginTop: '20px' }}>
-                <div className="chart-card" style={{ width: '100%' }}>
-                  <h3>{currentMetric.label} TOP 5 ({selectedYear || '-'}년)</h3>
-                  <div style={{ marginTop: '16px' }}>
-                    {topRegions.length > 0 ? topRegions.map((region, idx) => {
-                      const val = region[1][currentMetric.id];
-                      const barWidth = metricMax > metricMin ? ((val - metricMin) / (metricMax - metricMin)) * 100 : 50;
-                      return (
-                        <div className="bar-row" key={region[0]}>
-                          <span style={{width:'15px', fontSize:'12px', color:'#94A3B8'}}>{idx + 1}</span>
-                          <span className="bar-label">{region[0]}</span>
-                          <div className="bar-track" style={{ flex: 1, backgroundColor: '#F1F5F9', borderRadius: '6px', height: '12px', overflow: 'hidden' }}>
-                            <div className="bar-fill" style={{width: `${Math.max(barWidth, 5)}%`, backgroundColor: region[1].color, height: '100%', borderRadius: '6px'}}></div>
-                          </div>
-                          <span className="bar-value" style={{ width: '60px', textAlign: 'right' }}>{val.toLocaleString()}</span>
-                        </div>
-                      )
-                    }) : (
-                      <div style={{ textAlign: 'center', color: '#94A3B8', marginTop: '20px' }}>데이터가 없습니다.</div>
+                    </h3>
+                    
+                    {mapView === 'province' && (
+                      <button className="map-back-btn" onClick={handleResetMap}>
+                        ← 전국 지도로 돌아가기
+                      </button>
                     )}
+
+                    <div className="map-legend">
+                      <p style={{marginBottom: '8px', fontWeight: 'bold'}}>{currentMetric.label} 분포</p>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94A3B8', marginBottom: '4px' }}>
+                        <span>낮음</span>
+                        <span>높음</span>
+                      </div>
+                      
+                      <div style={{
+                        height: '12px',
+                        background: 'linear-gradient(to right, #15803D, #84CC16, #EAB308, #F97316, #EF4444)',
+                        borderRadius: '6px',
+                        marginBottom: '8px'
+                      }}></div>
+                      
+                      <div className="legend-item" style={{ marginTop: '12px' }}>
+                        <div className="legend-color" style={{background: '#94A3B8'}}></div> 데이터 없음
+                      </div>
+                    </div>
+
+                    <div style={{ width: '100%', height: '400px' }}>
+                      <ComposableMap 
+                        projection="geoMercator" 
+                        projectionConfig={{ scale: 4500, center: [127.5, 36] }}
+                        style={{ width: "100%", height: "100%", backgroundColor: "transparent" }}
+                      >
+                        <ZoomableGroup center={mapCenter} zoom={mapZoom} disablePanning>
+                          
+                          {mapView === 'national' && (
+                            <Geographies geography={KOREA_PROVINCE_URL}>
+                              {({ geographies }) =>
+                                geographies.map((geo) => {
+                                  const shortName = nameMapping[geo.properties.name] || geo.properties.name;
+                                  const d = dashboardMapData[shortName];
+                                  return (
+                                    <Geography
+                                      key={geo.rsmKey}
+                                      geography={geo}
+                                      onClick={() => handleProvinceClick(geo)}
+                                      onMouseEnter={() => setHoveredRegion(shortName)}
+                                      onMouseLeave={() => setHoveredRegion(null)}
+                                      className="geography-path"
+                                      style={{
+                                        default: { fill: d ? d.color : "#94A3B8", stroke: "#1C2B44", strokeWidth: 0.5, outline: "none" },
+                                        hover: { fill: "#3B82F6", stroke: "#FFF", strokeWidth: 1, cursor: "pointer", outline: "none" },
+                                        pressed: { fill: "#2563EB", outline: "none" },
+                                      }}
+                                      title={`${geo.properties.name} (클릭하여 줌인)`}
+                                    />
+                                  );
+                                })
+                              }
+                            </Geographies>
+                          )}
+
+                          {mapView === 'province' && (
+                            <Geographies geography={KOREA_MUNI_URL}>
+                              {({ geographies }) =>
+                                geographies.map((geo) => {
+                                  const isSelectedProv = geo.properties.code.startsWith(selectedProvCode);
+                                  const isClickedMuni = selectedMunicipality === geo.properties.name;
+                                  const d = dashboardMapData[geo.properties.name]; 
+
+                                  return (
+                                    <Geography
+                                      key={geo.rsmKey}
+                                      geography={geo}
+                                      onClick={() => handleMunicipalityClick(geo)}
+                                      onMouseEnter={() => {
+                                        if (isSelectedProv) setHoveredMunicipality(geo.properties.name);
+                                      }}
+                                      onMouseLeave={() => setHoveredMunicipality(null)}
+                                      className="geography-path"
+                                      style={{
+                                        default: {
+                                          fill: isSelectedProv ? (d ? d.color : "#94A3B8") : "#1F2937",
+                                          stroke: isSelectedProv ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.05)",
+                                          strokeWidth: isSelectedProv ? (isClickedMuni ? 2 : 0.3) : 0.1,
+                                          outline: "none"
+                                        },
+                                        hover: { 
+                                          fill: isSelectedProv ? (d ? "#3B82F6" : "#4B5563") : "#1F2937", 
+                                          cursor: isSelectedProv ? "pointer" : "default",
+                                          outline: "none" 
+                                        },
+                                        pressed: { fill: "#2563EB", outline: "none" },
+                                      }}
+                                      title={isSelectedProv ? geo.properties.name : ""}
+                                    />
+                                  );
+                                })
+                              }
+                            </Geographies>
+                          )}
+                        </ZoomableGroup>
+                      </ComposableMap>
+                    </div>
+
+                    <div style={{ marginTop: '20px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                      <p style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 'bold' }}>지도 표시 지표 선택 : <span style={{color: '#3B82F6'}}>{currentMetric.label}</span></p>
+                      
+                      <div style={{ 
+                        position: 'relative', 
+                        width: '100%', 
+                        height: '40px', 
+                        backgroundColor: '#1E293B', 
+                        borderRadius: '8px', 
+                        display: 'flex',
+                        alignItems: 'center',
+                        cursor: 'pointer',
+                        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                      }}>
+                        <div style={{
+                          position: 'absolute',
+                          height: '32px',
+                          width: `${100 / METRICS.length}%`,
+                          backgroundColor: '#3B82F6',
+                          borderRadius: '6px',
+                          left: `${(selectedMetricIdx / METRICS.length) * 100}%`,
+                          transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }} />
+
+                        {METRICS.map((m, idx) => (
+                          <div 
+                            key={m.id} 
+                            onClick={() => setSelectedMetricIdx(idx)} 
+                            style={{ 
+                              flex: 1, 
+                              textAlign: 'center', 
+                              zIndex: 1, 
+                              fontSize: '12px', 
+                              fontWeight: selectedMetricIdx === idx ? 'bold' : 'normal',
+                              color: selectedMetricIdx === idx ? '#FFFFFF' : '#94A3B8',
+                              transition: 'color 0.3s ease',
+                              padding: '0 8px',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}
+                            title={m.label} 
+                          >
+                            {m.label}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bottom-charts-row" style={{ display: 'block', width: '100%', marginTop: '20px' }}>
+                    <div className="chart-card" style={{ width: '100%' }}>
+                      <h3>{currentMetric.label} TOP 5 ({selectedYear || '-'}년)</h3>
+                      <div style={{ marginTop: '16px' }}>
+                        {topRegions.length > 0 ? topRegions.map((region, idx) => {
+                          const val = region[1][currentMetric.id];
+                          const barWidth = dashboardMax > dashboardMin ? ((val - dashboardMin) / (dashboardMax - dashboardMin)) * 100 : 50;
+                          return (
+                            <div className="bar-row" key={region[0]}>
+                              <span style={{width:'15px', fontSize:'12px', color:'#94A3B8'}}>{idx + 1}</span>
+                              <span className="bar-label">{region[0]}</span>
+                              <div className="bar-track" style={{ flex: 1, backgroundColor: '#F1F5F9', borderRadius: '6px', height: '12px', overflow: 'hidden' }}>
+                                <div className="bar-fill" style={{width: `${Math.max(barWidth, 5)}%`, backgroundColor: region[1].color, height: '100%', borderRadius: '6px'}}></div>
+                              </div>
+                              <span className="bar-value" style={{ width: '80px', textAlign: 'right' }}>{val.toLocaleString()}</span>
+                            </div>
+                          )
+                        }) : (
+                          <div style={{ textAlign: 'center', color: '#94A3B8', marginTop: '20px' }}>데이터가 없습니다.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="right-column">
+                  <div className="detail-card">
+                    <div className="detail-header">
+                      <h3>선택 지역 상세 정보</h3>
+                    </div>
+                    
+                    <div className="region-title">
+                      <h2>📍 {targetName}</h2>
+                    </div>
+
+                    <div className="radar-section">
+                      <div className="index-score" style={{ textAlign: 'left', width: '100%' }}>
+                        <p style={{ textAlign: 'left', margin: '0 0 8px 0' }}>선택된 지표 ({currentMetric.label})</p>
+                        <h1 style={{ color: displayData.color, justifyContent: 'flex-start' }}>
+                          {displayData.displayValue !== '-' ? displayData.displayValue.toLocaleString() : '-'}
+                          <span style={{fontSize: '16px', marginLeft: '4px'}}>{currentMetric.unit}</span>
+                        </h1>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+                      
+                      <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px' }}>주택 보험 가입 현황</p>
+                        <h4 style={{fontSize: '16px', margin: 0}}>
+                          {displayData.housing !== null && displayData.housing !== undefined ? displayData.housing.toLocaleString() : '-'}
+                          <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#94A3B8', marginLeft: '4px' }}>건</span>
+                        </h4>
+                      </div>
+                      
+                      <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px' }}>우심피해액</p>
+                        <h4 style={{fontSize: '16px', margin: 0}}>
+                          {displayData.damage !== null && displayData.damage !== undefined ? displayData.damage.toLocaleString() : '-'}
+                          <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#94A3B8', marginLeft: '4px' }}>원</span>
+                        </h4>
+                      </div>
+
+                      <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px' }}>인구수</p>
+                        <h4 style={{fontSize: '16px', margin: 0}}>
+                          {displayData.population !== null && displayData.population !== undefined ? displayData.population.toLocaleString() : '-'}
+                          <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#94A3B8', marginLeft: '4px' }}>명</span>
+                        </h4>
+                      </div>
+
+                    </div>
+
+                    <div className="ai-insight" style={{ minHeight: '120px' }}>
+                      <h4>✨ 분석 인사이트</h4>
+                      {isInsightLoading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60px' }}>
+                          <div style={{
+                            width: '24px', height: '24px', 
+                            border: '3px solid #E2E8F0', borderTop: '3px solid #3B82F6', 
+                            borderRadius: '50%', animation: 'spin 1s linear infinite'
+                          }}></div>
+                        </div>
+                      ) : (
+                        <p style={{ minHeight: '60px' }}>
+                          <TypewriterEffect text={insightText} delay={30} />
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-
-            <div className="right-column">
-              <div className="detail-card">
-                <div className="detail-header">
-                  <h3>선택 지역 상세 정보</h3>
-                </div>
-                
-                <div className="region-title">
-                  <h2>📍 {targetName}</h2>
-                </div>
-
-                <div className="radar-section">
-                  <div className="index-score">
-                    <p>선택된 지표 ({currentMetric.label})</p>
-                    <h1 style={{ color: displayData.color }}>
-                      {displayData.displayValue !== '-' ? displayData.displayValue.toLocaleString() : '-'}
-                      <span style={{fontSize: '16px', marginLeft: '4px'}}>{currentMetric.unit}</span>
-                    </h1>
-                  </div>
-                </div>
-
-                <div className="metrics-grid">
-                  <div className="metric-box">
-                    <p>주택(건)</p>
-                    <h4 style={{fontSize: '14px'}}>
-                      {displayData.housing !== null && displayData.housing !== undefined ? displayData.housing.toLocaleString() : '-'} 
-                    </h4>
-                  </div>
-                  <div className="metric-box">
-                    <p>온실(m²)</p>
-                    <h4 style={{fontSize: '14px'}}>
-                      {displayData.greenhouse !== null && displayData.greenhouse !== undefined ? displayData.greenhouse.toLocaleString() : '-'} 
-                    </h4>
-                  </div>
-                  <div className="metric-box">
-                    <p>소상공인(건)</p>
-                    <h4 style={{fontSize: '14px'}}>
-                      {displayData.smallbiz !== null && displayData.smallbiz !== undefined ? displayData.smallbiz.toLocaleString() : '-'} 
-                    </h4>
-                  </div>
-                  <div className="metric-box">
-                    <p>인구수(명)</p>
-                    <h4 style={{fontSize: '14px'}}>
-                      {displayData.population !== null && displayData.population !== undefined ? displayData.population.toLocaleString() : '-'} 
-                    </h4>
-                  </div>
-                </div>
-
-                <div className="ai-insight">
-                  <h4>✨ 분석 인사이트</h4>
-                  <p>
-                    선택하신 <b>{targetName}</b>의 {selectedYear || '-'}년 기준 상세 지표 현황입니다.
-                    지도 아래의 슬라이더를 통해 주택, 온실, 소상공인, 인구수 관련 항목을 변경하여 직관적인 분포도를 확인할 수 있습니다.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </main>
       </div>
     </div>
