@@ -40,6 +40,7 @@ const PROVINCE_MAP_CONFIG = {
   '제주': { code: '39', center: [126.5311, 33.3996], zoom: 10 }
 };
 
+// 지도 중앙값 계산 보조 객체 (시도 단위 텍스트 렌더링 위치)
 const PROVINCE_CENTERS = {
   '서울': [126.9780, 37.5665], '부산': [129.0756, 35.1795], '대구': [128.6014, 35.8714],
   '인천': [126.45, 37.4562], '광주': [126.8526, 35.1595], '대전': [127.3845, 36.3504],
@@ -49,7 +50,6 @@ const PROVINCE_CENTERS = {
   '경남': [128.2500, 35.2382], '제주': [126.5311, 33.3996]
 };
 
-// ✨ [수정] 슬라이더 메뉴 순서 변경 (우심피해액 -> 인구수 -> 가입현황(건) -> 가입현황(Z값))
 const METRICS = [
   { id: 'damage', label: '우심피해액(원)', unit: '원' }, 
   { id: 'population', label: '인구수(명)', unit: '명' },
@@ -213,13 +213,11 @@ const Dashboard = () => {
   const [isInsightLoading, setIsInsightLoading] = useState(false);
   const [insightText, setInsightText] = useState('');
 
-  // 듀얼 맵 (비교1) 용 상태
   const [selectedMetricIdxA, setSelectedMetricIdxA] = useState(0);
   const [selectedMetricIdxB, setSelectedMetricIdxB] = useState(1);
   const [checkedRangesA, setCheckedRangesA] = useState([]); 
   const [checkedRangesB, setCheckedRangesB] = useState([]);
 
-  // 커스텀 분수 맵 (비교2) 용 상태
   const calcOptions = [
     { id: 'damage', label: '우심피해액(원)' },
     { id: 'population', label: '인구수(명)' },
@@ -229,10 +227,15 @@ const Dashboard = () => {
   const [denominatorIdx, setDenominatorIdx] = useState(1); 
   const [hoveredRatioData, setHoveredRatioData] = useState(null); 
 
+  // ✨ [수정 2] 하드코딩된 날짜로 고정
+  const [csvLastModified] = useState('2026-07-20 23:59:59');
+  const [isInfoHovered, setIsInfoHovered] = useState(false);
+
   const fetchCSVData = async (url) => {
     try {
       const res = await fetch(url);
       if (!res.ok) return null;
+
       const contentType = res.headers.get('content-type');
       if (contentType && contentType.includes('text/html')) return null;
       const buffer = await res.arrayBuffer();
@@ -437,8 +440,12 @@ const Dashboard = () => {
       const ratio = min === max ? 0 : Math.max(0, Math.min(1, (val - min) / (max - min)));
       const color = getFilterColor(val, ratio);
       
+      // ✨ [수정 1] 필터링된 지역 정보 저장 시, 지역명뿐만 아니라 값을 포함한 객체 형태로 저장
       if (checkedRanges.length > 0 && color !== '#E2E8F0' && color !== '#94A3B8') {
-        filteredRegions.push(region);
+        filteredRegions.push({
+          name: region,
+          value: val
+        });
       }
 
       processedData[region] = {
@@ -693,16 +700,25 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* ✨ [수정 1] 필터링된 지역 결과 표기 방식 변경 (줄바꿈 및 값 포함) */}
           <div style={{ 
-            marginTop: '12px', padding: '12px', minHeight: '60px', 
+            marginTop: '12px', padding: '12px', minHeight: '60px', maxHeight: '150px', overflowY: 'auto',
             backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: '8px',
             fontSize: '12px', color: '#CBD5E1', lineHeight: '1.6'
           }}>
-            <strong style={{ color: '#FFF', display: 'block', marginBottom: '4px' }}>필터링된 지역 결과:</strong>
+            <strong style={{ color: '#FFF', display: 'block', marginBottom: '8px' }}>필터링된 지역 결과:</strong>
             {checkedRanges.length === 0 ? (
               <span style={{ color: '#64748B' }}>10% 단위 버튼을 선택하여 지역을 확인하세요.</span>
             ) : mapDataObj.filteredRegions.length > 0 ? (
-              mapDataObj.filteredRegions.join(', ')
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                {/* 지역명: 값 형태로 줄바꿈 렌더링 */}
+                {mapDataObj.filteredRegions.map((regionData, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <span>{regionData.name}</span>
+                    <span style={{ color: '#FFF', fontWeight: 'bold' }}>{regionData.value.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
             ) : (
               <span style={{ color: '#EF4444' }}>해당 구간에 속하는 지역이 없습니다.</span>
             )}
@@ -825,7 +841,6 @@ const Dashboard = () => {
                   <>
                     <p style={{ color: '#94A3B8', fontSize: '14px', marginBottom: '12px', fontWeight: 'bold' }}>{hoveredRatioData.region}</p>
                     
-                    {/* ✨ [수정] 항목명 표시 */}
                     {hoveredRatioData.value !== '데이터 없음' && (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '12px', fontSize: '12px', color: '#CBD5E1', width: '100%' }}>
                         <span style={{ whiteSpace: 'nowrap' }}>
@@ -903,6 +918,11 @@ const Dashboard = () => {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
           }
+          /* ✨ 말풍선 툴팁 애니메이션 */
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
         `}
       </style>
       
@@ -955,9 +975,38 @@ const Dashboard = () => {
               </select>
             ) : null}
           </div>
+          
           <div className="header-right">
             <span>데이터 연동 완료</span>
-            <button className="header-btn">ⓘ 데이터 안내</button>
+            <div 
+              style={{ position: 'relative', display: 'inline-block' }}
+              onMouseEnter={() => setIsInfoHovered(true)}
+              onMouseLeave={() => setIsInfoHovered(false)}
+            >
+              <button className="header-btn" style={{ cursor: 'pointer' }}>ⓘ 데이터 안내</button>
+              
+              {isInfoHovered && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: '0',
+                  marginTop: '10px',
+                  backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                  color: '#CBD5E1',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  zIndex: 100,
+                  animation: 'fadeIn 0.2s ease-out'
+                }}>
+                  {/* ✨ [수정 2] 고정된 날짜 출력 */}
+                  최종 수정일 : <span style={{ color: '#FFF', fontWeight: 'bold' }}>{csvLastModified}</span>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
