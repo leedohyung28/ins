@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from "react-simple-maps";
+import { fetchAnalysisInsights } from './insightsService'; // ★ 서비스 파일 임포트
 import './Dashboard.css';
 
 // 통계청 기준 대한민국 시도 및 시군구 GeoJSON
@@ -40,7 +41,6 @@ const PROVINCE_MAP_CONFIG = {
   '제주': { code: '39', center: [126.5311, 33.3996], zoom: 10 }
 };
 
-// 지도 중앙값 계산 보조 객체 (시도 단위 텍스트 렌더링 위치)
 const PROVINCE_CENTERS = {
   '서울': [126.9780, 37.5665], '부산': [129.0756, 35.1795], '대구': [128.6014, 35.8714],
   '인천': [126.45, 37.4562], '광주': [126.8526, 35.1595], '대전': [127.3845, 36.3504],
@@ -210,14 +210,18 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
+  // ★ 인사이트 데이터 상태 추가
+  const [insightsDictionary, setInsightsDictionary] = useState({});
   const [isInsightLoading, setIsInsightLoading] = useState(false);
   const [insightText, setInsightText] = useState('');
 
+  // 듀얼 맵 (비교1) 용 상태
   const [selectedMetricIdxA, setSelectedMetricIdxA] = useState(0);
   const [selectedMetricIdxB, setSelectedMetricIdxB] = useState(1);
   const [checkedRangesA, setCheckedRangesA] = useState([]); 
   const [checkedRangesB, setCheckedRangesB] = useState([]);
 
+  // 커스텀 분수 맵 (비교2) 용 상태
   const calcOptions = [
     { id: 'damage', label: '우심피해액(원)' },
     { id: 'population', label: '인구수(명)' },
@@ -227,9 +231,18 @@ const Dashboard = () => {
   const [denominatorIdx, setDenominatorIdx] = useState(1); 
   const [hoveredRatioData, setHoveredRatioData] = useState(null); 
 
-  // ✨ [수정 2] 하드코딩된 날짜로 고정
   const [csvLastModified] = useState('2026-07-20 23:59:59');
   const [isInfoHovered, setIsInfoHovered] = useState(false);
+
+  // ★ 첫 마운트 시 인사이트 데이터 로드
+  useEffect(() => {
+    const loadInsights = async () => {
+      const baseUrl = getBaseUrl();
+      const data = await fetchAnalysisInsights(baseUrl);
+      setInsightsDictionary(data);
+    };
+    loadInsights();
+  }, []);
 
   const fetchCSVData = async (url) => {
     try {
@@ -440,7 +453,6 @@ const Dashboard = () => {
       const ratio = min === max ? 0 : Math.max(0, Math.min(1, (val - min) / (max - min)));
       const color = getFilterColor(val, ratio);
       
-      // ✨ [수정 1] 필터링된 지역 정보 저장 시, 지역명뿐만 아니라 값을 포함한 객체 형태로 저장
       if (checkedRanges.length > 0 && color !== '#E2E8F0' && color !== '#94A3B8') {
         filteredRegions.push({
           name: region,
@@ -548,19 +560,54 @@ const Dashboard = () => {
     .sort((a, b) => b[1][currentMetric.id] - a[1][currentMetric.id])
     .slice(0, 5);
 
+  // ★ 현재 활성화된 데이터 기반으로 알맞은 인사이트 키 탐색 로직
+  const currentInsight = useMemo(() => {
+    if (Object.keys(insightsDictionary).length === 0) return '';
+    
+    let regionLevel = '';
+    let sido = '';
+    let regionName = '';
+
+    if (mapView === 'national') {
+      regionLevel = '시도';
+      sido = targetName;
+      regionName = targetName;
+    } else {
+      if (targetName === `${selectedRegion} 전체`) {
+        regionLevel = '시도';
+        sido = selectedRegion;
+        regionName = selectedRegion;
+      } else {
+        regionLevel = '시군구';
+        sido = selectedRegion;
+        regionName = targetName;
+      }
+    }
+
+    const indicatorId = currentMetric?.id || 'overall';
+    const lookupKey = `${selectedYear}|${regionLevel}|${sido}|${regionName}|${indicatorId}`;
+    const defaultKey = `${selectedYear}|${regionLevel}|${sido}|${regionName}|overall`;
+
+    // 선택된 지표에 맞는 데이터가 있으면 반환, 없으면 overall 기본값, 그래도 없으면 빈 문자열 반환
+    return insightsDictionary[lookupKey] || insightsDictionary[defaultKey] || '';
+  }, [insightsDictionary, targetName, mapView, selectedRegion, selectedYear, currentMetric]);
+
+  // ★ 인사이트 텍스트 상태 및 애니메이션 제어
   useEffect(() => {
     if (activeTab === 'dashboard') {
-      setIsInsightLoading(true);
-      setInsightText('');
-
-      const timer = setTimeout(() => {
+      if (currentInsight) {
+        setIsInsightLoading(true);
+        const timer = setTimeout(() => {
+          setIsInsightLoading(false);
+          setInsightText(currentInsight);
+        }, 1200); // 뷰 전환 시 부드러운 로딩 효과
+        return () => clearTimeout(timer);
+      } else {
         setIsInsightLoading(false);
-        setInsightText(`선택하신 ${targetName}의 ${selectedYear || '-'}년 기준 상세 지표 현황입니다. 지도 아래의 슬라이더를 통해 항목을 변경하여 직관적인 분포도를 확인할 수 있습니다.`);
-      }, 2000); 
-
-      return () => clearTimeout(timer);
+        setInsightText('');
+      }
     }
-  }, [targetName, selectedYear, activeTab]);
+  }, [currentInsight, activeTab]);
 
   const handleCheckboxToggle = (mapType, rangeIndex) => {
     if (mapType === 'A') {
@@ -641,7 +688,6 @@ const Dashboard = () => {
                             }}
                             title={name}
                           />
-                          {d && renderMapText(geo, d.displayValue)}
                         </g>
                       );
                     })
@@ -700,7 +746,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* ✨ [수정 1] 필터링된 지역 결과 표기 방식 변경 (줄바꿈 및 값 포함) */}
           <div style={{ 
             marginTop: '12px', padding: '12px', minHeight: '60px', maxHeight: '150px', overflowY: 'auto',
             backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: '8px',
@@ -711,7 +756,6 @@ const Dashboard = () => {
               <span style={{ color: '#64748B' }}>10% 단위 버튼을 선택하여 지역을 확인하세요.</span>
             ) : mapDataObj.filteredRegions.length > 0 ? (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {/* 지역명: 값 형태로 줄바꿈 렌더링 */}
                 {mapDataObj.filteredRegions.map((regionData, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                     <span>{regionData.name}</span>
@@ -1002,7 +1046,6 @@ const Dashboard = () => {
                   zIndex: 100,
                   animation: 'fadeIn 0.2s ease-out'
                 }}>
-                  {/* ✨ [수정 2] 고정된 날짜 출력 */}
                   최종 수정일 : <span style={{ color: '#FFF', fontWeight: 'bold' }}>{csvLastModified}</span>
                 </div>
               )}
@@ -1283,22 +1326,25 @@ const Dashboard = () => {
 
                     </div>
 
-                    <div className="ai-insight" style={{ minHeight: '120px' }}>
-                      <h4>✨ 분석 인사이트</h4>
-                      {isInsightLoading ? (
-                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60px' }}>
-                          <div style={{
-                            width: '24px', height: '24px', 
-                            border: '3px solid #E2E8F0', borderTop: '3px solid #3B82F6', 
-                            borderRadius: '50%', animation: 'spin 1s linear infinite'
-                          }}></div>
-                        </div>
-                      ) : (
-                        <p style={{ minHeight: '60px' }}>
-                          <TypewriterEffect text={insightText} delay={30} />
-                        </p>
-                      )}
-                    </div>
+                    {/* ★ 인사이트 데이터가 존재할 때만 표시되는 영역 */}
+                    { (isInsightLoading || insightText) && (
+                      <div className="ai-insight" style={{ minHeight: '120px' }}>
+                        <h4>✨ 분석 인사이트</h4>
+                        {isInsightLoading ? (
+                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60px' }}>
+                            <div style={{
+                              width: '24px', height: '24px', 
+                              border: '3px solid #E2E8F0', borderTop: '3px solid #3B82F6', 
+                              borderRadius: '50%', animation: 'spin 1s linear infinite'
+                            }}></div>
+                          </div>
+                        ) : (
+                          <p style={{ minHeight: '60px' }}>
+                            <TypewriterEffect text={insightText} delay={30} />
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
