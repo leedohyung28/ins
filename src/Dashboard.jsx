@@ -40,11 +40,21 @@ const PROVINCE_MAP_CONFIG = {
   '제주': { code: '39', center: [126.5311, 33.3996], zoom: 10 }
 };
 
+const PROVINCE_CENTERS = {
+  '서울': [126.9780, 37.5665], '부산': [129.0756, 35.1795], '대구': [128.6014, 35.8714],
+  '인천': [126.45, 37.4562], '광주': [126.8526, 35.1595], '대전': [127.3845, 36.3504],
+  '울산': [129.3113, 35.5383], '세종': [127.2890, 36.4800], '경기': [127.2693, 37.5],
+  '강원': [128.2093, 37.8228], '충북': [127.9259, 36.6358], '충남': [126.8000, 36.5184],
+  '전북': [127.1530, 35.7175], '전남': [126.9910, 34.8160], '경북': [128.8889, 36.4919],
+  '경남': [128.2500, 35.2382], '제주': [126.5311, 33.3996]
+};
+
+// ✨ [수정] 슬라이더 메뉴 순서 변경 (우심피해액 -> 인구수 -> 가입현황(건) -> 가입현황(Z값))
 const METRICS = [
   { id: 'damage', label: '우심피해액(원)', unit: '원' }, 
+  { id: 'population', label: '인구수(명)', unit: '명' },
   { id: 'housing', label: '주택 보험 가입 현황(건)', unit: '건' },
   { id: 'housingZ', label: '주택 보험 가입 현황(Z값)', unit: '' },
-  { id: 'population', label: '인구수(건)', unit: '명' },
 ];
 
 const parseVal = (val) => {
@@ -175,8 +185,8 @@ const TypewriterEffect = ({ text, delay = 50 }) => {
 
 
 const Dashboard = () => {
-  // ✨ [추가] 네비게이션 탭 상태 추가 ('dashboard' | 'analysis')
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [analysisMode, setAnalysisMode] = useState('compare1');
 
   const [availableYears, setAvailableYears] = useState([2024, 2025, 2026]);
   const [selectedYear, setSelectedYear] = useState(2026); 
@@ -203,38 +213,39 @@ const Dashboard = () => {
   const [isInsightLoading, setIsInsightLoading] = useState(false);
   const [insightText, setInsightText] = useState('');
 
-  // ✨ [추가] 듀얼 맵 분석용 독립 상태 (A맵, B맵)
+  // 듀얼 맵 (비교1) 용 상태
   const [selectedMetricIdxA, setSelectedMetricIdxA] = useState(0);
   const [selectedMetricIdxB, setSelectedMetricIdxB] = useState(1);
-  const [checkedRangesA, setCheckedRangesA] = useState([]); // ex: [0, 1] (0~20%, 20~40%)
+  const [checkedRangesA, setCheckedRangesA] = useState([]); 
   const [checkedRangesB, setCheckedRangesB] = useState([]);
+
+  // 커스텀 분수 맵 (비교2) 용 상태
+  const calcOptions = [
+    { id: 'damage', label: '우심피해액(원)' },
+    { id: 'population', label: '인구수(명)' },
+    { id: 'housing', label: '주택보험가입현황(건)' }
+  ];
+  const [numeratorIdx, setNumeratorIdx] = useState(0);   
+  const [denominatorIdx, setDenominatorIdx] = useState(1); 
+  const [hoveredRatioData, setHoveredRatioData] = useState(null); 
 
   const fetchCSVData = async (url) => {
     try {
       const res = await fetch(url);
-      if (!res.ok) {
-        console.warn(`파일을 찾을 수 없습니다 (상태코드 ${res.status}): ${url}`);
-        return null;
-      }
-
+      if (!res.ok) return null;
       const contentType = res.headers.get('content-type');
       if (contentType && contentType.includes('text/html')) return null;
-
       const buffer = await res.arrayBuffer();
       
       let decoder = new TextDecoder('utf-8');
       let csvText = decoder.decode(buffer);
-      
       if (csvText.includes('\uFFFD')) {
         decoder = new TextDecoder('euc-kr');
         csvText = decoder.decode(buffer);
       }
-
       if (csvText.trim().startsWith('<')) return null;
-
       return parseCSV(csvText);
     } catch (e) {
-      console.error(`데이터 페칭 에러 (${url}):`, e);
       return null;
     }
   };
@@ -371,7 +382,6 @@ const Dashboard = () => {
   };
 
 
-  // ✨ 데이터 처리 공통 로직
   const currentNational = nationalDataCache[selectedYear] || { totals: {}, dataMap: {} };
   let currentMapData = {};
   let currentTotals = {};
@@ -387,7 +397,6 @@ const Dashboard = () => {
     currentTotals = muniData.totals;
   }
 
-  // ✨ [추가] 범용적으로 데이터를 처리하고 색상을 입히는 함수 (체크박스 필터링 포함)
   const processMapData = (metricId, checkedRanges) => {
     let min = Infinity;
     let max = -Infinity;
@@ -403,24 +412,25 @@ const Dashboard = () => {
     const getFilterColor = (val, ratio) => {
       if (val === null || val === undefined) return '#94A3B8';
       
-      // 체크된 범위가 없으면 기존 그라데이션 반환
       if (checkedRanges.length === 0) {
         if (min === max) return '#EAB308';
         return getGradientColor(ratio);
       }
 
-      // 0~4 인덱스 산출 (0~20%, 20~40%, 40~60%, 60~80%, 80~100%)
-      const rangeIndex = Math.min(4, Math.floor(ratio * 5)); 
+      const rangeIndex = Math.min(9, Math.floor(ratio * 10)); 
       
       if (checkedRanges.includes(rangeIndex)) {
-        const stops = ['#15803D', '#84CC16', '#EAB308', '#F97316', '#EF4444'];
-        return stops[rangeIndex];
+        const stops10 = [
+          '#15803D', '#22C55E', '#84CC16', '#D9F99D', '#FEF08A', 
+          '#EAB308', '#F97316', '#EA580C', '#EF4444', '#B91C1C'
+        ];
+        return stops10[rangeIndex];
       }
-      return '#E2E8F0'; // 범위 밖 데이터는 회색
+      return '#E2E8F0'; 
     };
 
     const processedData = {};
-    const filteredRegions = []; // 선택된 구간에 포함된 지역 리스트 수집
+    const filteredRegions = []; 
 
     Object.keys(currentMapData).forEach(region => {
       const val = currentMapData[region][metricId];
@@ -442,14 +452,62 @@ const Dashboard = () => {
     return { processedData, min, max, filteredRegions };
   };
 
-  // 대시보드 뷰 데이터
+  const processRatioMapData = () => {
+    const numId = calcOptions[numeratorIdx].id;
+    const denId = calcOptions[denominatorIdx].id;
+    
+    let min = Infinity;
+    let max = -Infinity;
+    const ratioMap = {};
+
+    Object.keys(currentMapData).forEach(region => {
+      const d = currentMapData[region];
+      const numVal = d[numId];
+      const denVal = d[denId];
+
+      let calcVal = null;
+      if (numVal !== null && numVal !== undefined && denVal !== null && denVal !== undefined && denVal !== 0) {
+        calcVal = numVal / denVal;
+        if (calcVal < min) min = calcVal;
+        if (calcVal > max) max = calcVal;
+      }
+      ratioMap[region] = calcVal;
+    });
+
+    const processedData = {};
+    Object.keys(currentMapData).forEach(region => {
+      const val = ratioMap[region];
+      let color = '#94A3B8';
+      let ratio = 0;
+
+      if (val !== null) {
+        if (min === max) {
+          color = '#EAB308';
+        } else {
+          ratio = Math.max(0, Math.min(1, (val - min) / (max - min)));
+          color = getGradientColor(ratio);
+        }
+      }
+
+      processedData[region] = {
+        ...currentMapData[region],
+        color,
+        displayValue: val !== null ? val : '-',
+        ratio
+      };
+    });
+
+    return { processedData, min, max };
+  };
+
   const dashboardMapData = processMapData(currentMetric.id, []).processedData;
   const dashboardMin = processMapData(currentMetric.id, []).min;
   const dashboardMax = processMapData(currentMetric.id, []).max;
 
-  // 분석 뷰 데이터
   const mapDataA = processMapData(METRICS[selectedMetricIdxA].id, checkedRangesA);
   const mapDataB = processMapData(METRICS[selectedMetricIdxB].id, checkedRangesB);
+
+  const mapDataRatio = processRatioMapData();
 
   let rightColData = null;
   let targetName = '';
@@ -505,9 +563,38 @@ const Dashboard = () => {
     }
   };
 
-  // ✨ [추가] 듀얼 맵 분석 레이아웃 렌더링 함수
+  const renderMapText = (geo, val) => {
+    if (val === null || val === undefined || val === '-') return null;
+    
+    if (mapView === 'national') {
+      const name = nameMapping[geo.properties.name] || geo.properties.name;
+      const center = PROVINCE_CENTERS[name];
+      if (!center) return null;
+      
+      return (
+        <text
+          x={center[0]}
+          y={center[1]}
+          textAnchor="middle"
+          alignmentBaseline="middle"
+          style={{
+            fill: "#FFFFFF",
+            fontSize: "10px",
+            fontWeight: "bold",
+            pointerEvents: "none",
+            textShadow: "1px 1px 2px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)"
+          }}
+        >
+          {val.toLocaleString()}
+        </text>
+      );
+    }
+    return null;
+  };
+
   const renderAnalysisView = () => {
-    const renderMap = (mapType, mapDataObj, metricIdx, setMetricIdx, checkedRanges) => {
+
+    const renderDualMap = (mapType, mapDataObj, metricIdx, setMetricIdx, checkedRanges) => {
       const metric = METRICS[metricIdx];
       
       return (
@@ -521,42 +608,34 @@ const Dashboard = () => {
           )}
 
           <div style={{ flex: 1, position: 'relative' }}>
-            <ComposableMap 
-              projection="geoMercator" 
-              projectionConfig={{ scale: 4500, center: [127.5, 36] }}
-              style={{ width: "100%", height: "100%", backgroundColor: "transparent" }}
-            >
+            <ComposableMap projection="geoMercator" projectionConfig={{ scale: 4500, center: [127.5, 36] }} style={{ width: "100%", height: "100%", backgroundColor: "transparent" }}>
               <ZoomableGroup center={mapCenter} zoom={mapZoom} disablePanning>
                 <Geographies geography={mapView === 'national' ? KOREA_PROVINCE_URL : KOREA_MUNI_URL}>
                   {({ geographies }) =>
                     geographies.map((geo) => {
-                      const name = mapView === 'national' 
-                        ? (nameMapping[geo.properties.name] || geo.properties.name)
-                        : geo.properties.name;
-                      
+                      const name = mapView === 'national' ? (nameMapping[geo.properties.name] || geo.properties.name) : geo.properties.name;
                       const isSelectedProv = mapView === 'province' ? geo.properties.code.startsWith(selectedProvCode) : true;
                       const d = mapDataObj.processedData[name];
 
                       let fillStr = "#1F2937";
-                      if (mapView === 'national') {
-                        fillStr = d ? d.color : "#94A3B8";
-                      } else {
-                        fillStr = isSelectedProv ? (d ? d.color : "#94A3B8") : "#1F2937";
-                      }
+                      if (mapView === 'national') fillStr = d ? d.color : "#94A3B8";
+                      else fillStr = isSelectedProv ? (d ? d.color : "#94A3B8") : "#1F2937";
 
                       return (
-                        <Geography
-                          key={geo.rsmKey}
-                          geography={geo}
-                          onClick={() => mapView === 'national' ? handleProvinceClick(geo) : null}
-                          className="geography-path"
-                          style={{
-                            default: { fill: fillStr, stroke: "#1C2B44", strokeWidth: mapView === 'national' ? 0.5 : (isSelectedProv ? 0.3 : 0.1), outline: "none" },
-                            hover: { fill: (mapView === 'national' || isSelectedProv) ? "#3B82F6" : "#1F2937", cursor: (mapView === 'national' || isSelectedProv) ? "pointer" : "default", outline: "none" },
-                            pressed: { fill: "#2563EB", outline: "none" },
-                          }}
-                          title={name}
-                        />
+                        <g key={geo.rsmKey}>
+                          <Geography
+                            geography={geo}
+                            onClick={() => mapView === 'national' ? handleProvinceClick(geo) : null}
+                            className="geography-path"
+                            style={{
+                              default: { fill: fillStr, stroke: "#1C2B44", strokeWidth: mapView === 'national' ? 0.5 : (isSelectedProv ? 0.3 : 0.1), outline: "none" },
+                              hover: { fill: (mapView === 'national' || isSelectedProv) ? "#3B82F6" : "#1F2937", cursor: (mapView === 'national' || isSelectedProv) ? "pointer" : "default", outline: "none" },
+                              pressed: { fill: "#2563EB", outline: "none" },
+                            }}
+                            title={name}
+                          />
+                          {d && renderMapText(geo, d.displayValue)}
+                        </g>
                       );
                     })
                   }
@@ -565,7 +644,6 @@ const Dashboard = () => {
             </ComposableMap>
           </div>
 
-          {/* 슬라이더 컨트롤 */}
           <div style={{ marginTop: '16px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
             <div style={{ position: 'relative', width: '100%', height: '36px', backgroundColor: '#1E293B', borderRadius: '8px', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
               <div style={{
@@ -575,40 +653,46 @@ const Dashboard = () => {
               }} />
               {METRICS.map((m, idx) => (
                 <div key={m.id} onClick={() => setMetricIdx(idx)} style={{ flex: 1, textAlign: 'center', zIndex: 1, fontSize: '11px', fontWeight: metricIdx === idx ? 'bold' : 'normal', color: metricIdx === idx ? '#FFFFFF' : '#94A3B8' }}>
-                  {m.label.split('(')[0]}
+                  {m.label} 
                 </div>
               ))}
             </div>
           </div>
 
-          {/* 체크박스 구간 필터 컨트롤 */}
           <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '8px' }}>
-            <p style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>분포 구간 선택 필터링</p>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-              {[
-                { label: '0~20% (낮음)', color: '#15803D' },
-                { label: '20~40%', color: '#84CC16' },
-                { label: '40~60%', color: '#EAB308' },
-                { label: '60~80%', color: '#F97316' },
-                { label: '80~100% (높음)', color: '#EF4444' }
-              ].map((range, idx) => (
-                <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={checkedRanges.includes(idx)}
-                    onChange={() => handleCheckboxToggle(mapType, idx)}
-                    style={{ accentColor: range.color }}
-                  />
-                  <span style={{ color: checkedRanges.includes(idx) ? '#FFF' : '#94A3B8' }}>
-                    <span style={{ display:'inline-block', width:'8px', height:'8px', backgroundColor: range.color, marginRight:'4px', borderRadius:'2px' }}></span>
-                    {range.label}
-                  </span>
-                </label>
-              ))}
+            <p style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>10% 단위 분포 필터링</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', fontSize: '10px' }}>
+              {Array.from({length: 10}).map((_, idx) => {
+                const isChecked = checkedRanges.includes(idx);
+                const label = `${idx*10}~${(idx+1)*10}%`;
+                const stops10 = [
+                  '#15803D', '#22C55E', '#84CC16', '#D9F99D', '#FEF08A', 
+                  '#EAB308', '#F97316', '#EA580C', '#EF4444', '#B91C1C'
+                ];
+                const baseColor = stops10[idx];
+                return (
+                  <div 
+                    key={idx}
+                    onClick={() => handleCheckboxToggle(mapType, idx)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '12px',
+                      border: `1px solid ${isChecked ? baseColor : '#334155'}`,
+                      backgroundColor: isChecked ? baseColor : 'transparent',
+                      color: isChecked ? '#FFF' : '#94A3B8',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      flex: '1 1 calc(20% - 6px)',
+                      textAlign: 'center'
+                    }}
+                  >
+                    {label}
+                  </div>
+                )
+              })}
             </div>
           </div>
 
-          {/* 필터링된 지역 리스트 박스 */}
           <div style={{ 
             marginTop: '12px', padding: '12px', minHeight: '60px', 
             backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: '8px',
@@ -616,22 +700,197 @@ const Dashboard = () => {
           }}>
             <strong style={{ color: '#FFF', display: 'block', marginBottom: '4px' }}>필터링된 지역 결과:</strong>
             {checkedRanges.length === 0 ? (
-              <span style={{ color: '#64748B' }}>체크박스를 선택하여 해당 구간의 지역을 확인하세요.</span>
+              <span style={{ color: '#64748B' }}>10% 단위 버튼을 선택하여 지역을 확인하세요.</span>
             ) : mapDataObj.filteredRegions.length > 0 ? (
               mapDataObj.filteredRegions.join(', ')
             ) : (
               <span style={{ color: '#EF4444' }}>해당 구간에 속하는 지역이 없습니다.</span>
             )}
           </div>
+        </div>
+      );
+    };
 
+    const renderRatioMap = () => {
+      return (
+        <div style={{ display: 'flex', gap: '20px', width: '100%', height: '100%' }}>
+          <div className="map-card" style={{ flex: 7, display: 'flex', flexDirection: 'column', height: 'auto', minHeight: '650px', padding: '16px' }}>
+            <h3 style={{ marginBottom: '16px', fontSize: '15px' }}>사용자 정의 지표 비교 분석</h3>
+            
+            {mapView === 'province' && (
+              <button className="map-back-btn" onClick={handleResetMap} style={{ top: '16px', right: '16px' }}>
+                ← 전국 지도
+              </button>
+            )}
+
+            <div style={{ flex: 1, position: 'relative' }}>
+              <ComposableMap projection="geoMercator" projectionConfig={{ scale: 4500, center: [127.5, 36] }} style={{ width: "100%", height: "100%", backgroundColor: "transparent" }}>
+                <ZoomableGroup center={mapCenter} zoom={mapZoom} disablePanning>
+                  <Geographies geography={mapView === 'national' ? KOREA_PROVINCE_URL : KOREA_MUNI_URL}>
+                    {({ geographies }) =>
+                      geographies.map((geo) => {
+                        const name = mapView === 'national' ? (nameMapping[geo.properties.name] || geo.properties.name) : geo.properties.name;
+                        const isSelectedProv = mapView === 'province' ? geo.properties.code.startsWith(selectedProvCode) : true;
+                        const d = mapDataRatio.processedData[name];
+
+                        let fillStr = "#1F2937";
+                        if (mapView === 'national') fillStr = d ? d.color : "#94A3B8";
+                        else fillStr = isSelectedProv ? (d ? d.color : "#94A3B8") : "#1F2937";
+
+                        return (
+                          <g key={geo.rsmKey}>
+                            <Geography
+                              geography={geo}
+                              onClick={() => mapView === 'national' ? handleProvinceClick(geo) : null}
+                              onMouseEnter={() => {
+                                const regionData = currentMapData[name];
+                                if (d && d.displayValue !== '-' && regionData) {
+                                  const numVal = regionData[calcOptions[numeratorIdx].id];
+                                  const denVal = regionData[calcOptions[denominatorIdx].id];
+                                  setHoveredRatioData({ 
+                                    region: name, 
+                                    value: d.displayValue,
+                                    numVal: numVal,
+                                    denVal: denVal
+                                  });
+                                } else {
+                                  setHoveredRatioData({ region: name, value: '데이터 없음', numVal: '-', denVal: '-' });
+                                }
+                              }}
+                              onMouseLeave={() => setHoveredRatioData(null)}
+                              className="geography-path"
+                              style={{
+                                default: { fill: fillStr, stroke: "#1C2B44", strokeWidth: mapView === 'national' ? 0.5 : (isSelectedProv ? 0.3 : 0.1), outline: "none" },
+                                hover: { fill: (mapView === 'national' || isSelectedProv) ? "#3B82F6" : "#1F2937", cursor: (mapView === 'national' || isSelectedProv) ? "pointer" : "default", outline: "none" },
+                                pressed: { fill: "#2563EB", outline: "none" },
+                              }}
+                              title={name}
+                            />
+                            {d && d.displayValue !== '-' && renderMapText(geo, parseFloat(d.displayValue.toFixed(3)))}
+                          </g>
+                        );
+                      })
+                    }
+                  </Geographies>
+                </ZoomableGroup>
+              </ComposableMap>
+            </div>
+          </div>
+
+          <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="detail-card" style={{ padding: '24px' }}>
+              <h3 style={{ fontSize: '15px', marginBottom: '20px', borderBottom: '1px solid #334155', paddingBottom: '12px' }}>분석 수식 설정</h3>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                <div style={{ width: '100%' }}>
+                  <label style={{ fontSize: '11px', color: '#94A3B8', marginBottom: '4px', display: 'block', textAlign: 'center' }}>분자 (Numerator)</label>
+                  <select 
+                    value={numeratorIdx} 
+                    onChange={e => setNumeratorIdx(Number(e.target.value))}
+                    style={{ width: '100%', padding: '6px', borderRadius: '4px', backgroundColor: '#1E293B', color: '#FFF', border: '1px solid #334155', fontSize: '12px' }}
+                  >
+                    {calcOptions.map((opt, idx) => <option key={idx} value={idx}>{opt.label}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ width: '100%', height: '4px', backgroundColor: '#3B82F6', margin: '4px 0', borderRadius: '2px' }}></div>
+
+                <div style={{ width: '100%' }}>
+                  <label style={{ fontSize: '11px', color: '#94A3B8', marginBottom: '4px', display: 'block', textAlign: 'center' }}>분모 (Denominator)</label>
+                  <select 
+                    value={denominatorIdx} 
+                    onChange={e => setDenominatorIdx(Number(e.target.value))}
+                    style={{ width: '100%', padding: '6px', borderRadius: '4px', backgroundColor: '#1E293B', color: '#FFF', border: '1px solid #334155', fontSize: '12px' }}
+                  >
+                    {calcOptions.map((opt, idx) => <option key={idx} value={idx}>{opt.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="detail-card" style={{ padding: '24px', flex: 1 }}>
+              <h3 style={{ fontSize: '15px', marginBottom: '20px' }}>실시간 계산 결과</h3>
+              <div style={{ 
+                backgroundColor: '#1E293B', 
+                borderRadius: '8px', 
+                padding: '20px',
+                height: '180px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                border: '1px solid #334155'
+              }}>
+                {hoveredRatioData ? (
+                  <>
+                    <p style={{ color: '#94A3B8', fontSize: '14px', marginBottom: '12px', fontWeight: 'bold' }}>{hoveredRatioData.region}</p>
+                    
+                    {/* ✨ [수정] 항목명 표시 */}
+                    {hoveredRatioData.value !== '데이터 없음' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '12px', fontSize: '12px', color: '#CBD5E1', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>
+                          <span style={{ color: '#94A3B8', marginRight: '6px' }}>{calcOptions[numeratorIdx].label} :</span> 
+                          {hoveredRatioData.numVal ? hoveredRatioData.numVal.toLocaleString() : '-'}
+                        </span>
+                        <div style={{ width: '120px', height: '1px', backgroundColor: '#64748B', margin: '4px 0' }}></div>
+                        <span style={{ whiteSpace: 'nowrap' }}>
+                          <span style={{ color: '#94A3B8', marginRight: '6px' }}>{calcOptions[denominatorIdx].label} :</span>
+                          {hoveredRatioData.denVal ? hoveredRatioData.denVal.toLocaleString() : '-'}
+                        </span>
+                      </div>
+                    )}
+
+                    <h1 style={{ color: '#3B82F6', fontSize: '28px', margin: 0 }}>
+                      {typeof hoveredRatioData.value === 'number' ? hoveredRatioData.value.toFixed(4) : hoveredRatioData.value}
+                    </h1>
+                  </>
+                ) : (
+                  <p style={{ color: '#64748B', fontSize: '13px', textAlign: 'center' }}>
+                    지도에서 지역에 마우스를<br/>올리면 결과가 표시됩니다.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       );
     };
 
     return (
-      <div style={{ display: 'flex', gap: '20px', width: '100%', height: '100%' }}>
-        {renderMap('A', mapDataA, selectedMetricIdxA, setSelectedMetricIdxA, checkedRangesA)}
-        {renderMap('B', mapDataB, selectedMetricIdxB, setSelectedMetricIdxB, checkedRangesB)}
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+        <div style={{ alignSelf: 'flex-start', display: 'flex', backgroundColor: '#1E293B', borderRadius: '8px', padding: '4px', border: '1px solid #334155' }}>
+          <button 
+            onClick={() => setAnalysisMode('compare1')}
+            style={{
+              padding: '8px 24px', fontSize: '13px', fontWeight: 'bold', border: 'none',
+              backgroundColor: analysisMode === 'compare1' ? '#3B82F6' : 'transparent',
+              color: analysisMode === 'compare1' ? '#FFF' : '#94A3B8',
+              borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
+            }}
+          >
+            비교 1 (듀얼 맵)
+          </button>
+          <button 
+            onClick={() => setAnalysisMode('compare2')}
+            style={{
+              padding: '8px 24px', fontSize: '13px', fontWeight: 'bold', border: 'none',
+              backgroundColor: analysisMode === 'compare2' ? '#3B82F6' : 'transparent',
+              color: analysisMode === 'compare2' ? '#FFF' : '#94A3B8',
+              borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
+            }}
+          >
+            비교 2 (사용자 수식 맵)
+          </button>
+        </div>
+
+        {analysisMode === 'compare1' ? (
+          <div style={{ display: 'flex', gap: '20px', width: '100%', flex: 1 }}>
+            {renderDualMap('A', mapDataA, selectedMetricIdxA, setSelectedMetricIdxA, checkedRangesA)}
+            {renderDualMap('B', mapDataB, selectedMetricIdxB, setSelectedMetricIdxB, checkedRangesB)}
+          </div>
+        ) : (
+          renderRatioMap()
+        )}
       </div>
     );
   };
@@ -657,7 +916,6 @@ const Dashboard = () => {
         </div>
         <nav className="nav-menu">
           <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')} style={{ cursor: 'pointer' }}>대시보드</div>
-          {/* ✨ [추가] 보험보장공백 분석 메뉴 탭 추가 */}
           <div className={`nav-item ${activeTab === 'analysis' ? 'active' : ''}`} onClick={() => setActiveTab('analysis')} style={{ cursor: 'pointer' }}>보험보장공백 분석</div>
           <div className="nav-item" onClick={handleDownload} style={{ cursor: 'pointer' }}>데이터 다운로드</div>
         </nav>
@@ -705,12 +963,10 @@ const Dashboard = () => {
 
         <main className="content-wrapper" style={{ overflowY: 'auto' }}>
           
-          {/* ✨ 활성화된 탭에 따라 화면 전환 */}
           {activeTab === 'analysis' ? (
             renderAnalysisView()
           ) : (
             <>
-              {/* 기존 대시보드 뷰 시작 */}
               <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
                 
                 <div className="stat-card">
@@ -789,20 +1045,22 @@ const Dashboard = () => {
                                   const shortName = nameMapping[geo.properties.name] || geo.properties.name;
                                   const d = dashboardMapData[shortName];
                                   return (
-                                    <Geography
-                                      key={geo.rsmKey}
-                                      geography={geo}
-                                      onClick={() => handleProvinceClick(geo)}
-                                      onMouseEnter={() => setHoveredRegion(shortName)}
-                                      onMouseLeave={() => setHoveredRegion(null)}
-                                      className="geography-path"
-                                      style={{
-                                        default: { fill: d ? d.color : "#94A3B8", stroke: "#1C2B44", strokeWidth: 0.5, outline: "none" },
-                                        hover: { fill: "#3B82F6", stroke: "#FFF", strokeWidth: 1, cursor: "pointer", outline: "none" },
-                                        pressed: { fill: "#2563EB", outline: "none" },
-                                      }}
-                                      title={`${geo.properties.name} (클릭하여 줌인)`}
-                                    />
+                                    <g key={geo.rsmKey}>
+                                      <Geography
+                                        geography={geo}
+                                        onClick={() => handleProvinceClick(geo)}
+                                        onMouseEnter={() => setHoveredRegion(shortName)}
+                                        onMouseLeave={() => setHoveredRegion(null)}
+                                        className="geography-path"
+                                        style={{
+                                          default: { fill: d ? d.color : "#94A3B8", stroke: "#1C2B44", strokeWidth: 0.5, outline: "none" },
+                                          hover: { fill: "#3B82F6", stroke: "#FFF", strokeWidth: 1, cursor: "pointer", outline: "none" },
+                                          pressed: { fill: "#2563EB", outline: "none" },
+                                        }}
+                                        title={`${geo.properties.name} (클릭하여 줌인)`}
+                                      />
+                                      {d && renderMapText(geo, d.displayValue)}
+                                    </g>
                                   );
                                 })
                               }
