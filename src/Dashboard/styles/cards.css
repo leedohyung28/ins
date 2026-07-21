@@ -1,0 +1,261 @@
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.stat-card,
+.chart-card,
+.detail-card {
+  background: var(--bg-card);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-card);
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+}
+
+.stat-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  border-radius: 50%;
+  font-size: 22px;
+}
+
+.stat-info {
+  min-width: 0;
+}
+
+.stat-info p {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.stat-info h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow-wrap: anywhere;
+  font-size: clamp(18px, 2vw, 24px);
+  font-weight: 700;
+}
+
+.stat-info h2 span {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.chart-card {
+  padding: 20px;
+}
+
+.chart-card h3 {
+  margin-bottom: 16px;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.bar-chart {
+  margin-top: 8px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.bar-rank {
+  width: 16px;
+  flex: 0 0 16px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.bar-label {
+  width: 64px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.bar-track {
+  min-width: 60px;
+  flex: 1;
+  height: 12px;
+  overflow: hidden;
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.25s ease;
+}
+
+.bar-value {
+  width: 112px;
+  flex: 0 0 112px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-card {
+  padding: 24px;
+}
+
+.region-detail-card {
+  flex: 1;
+}
+
+.detail-header h3 {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 16px;
+}
+
+.region-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.region-title h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 20px;
+}
+
+.radar-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.index-score {
+  width: 100%;
+  text-align: left;
+}
+
+.index-score p {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.index-score h1 {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow-wrap: anywhere;
+  font-size: clamp(30px, 3.2vw, 42px);
+}
+
+.index-score h1 span {
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.detail-metrics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.metric-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--small-radius);
+}
+
+.metric-box p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.metric-box h4 {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.metric-box h4 span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.ai-insight {
+  min-height: 120px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: var(--small-radius);
+}
+
+.ai-insight h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--accent-blue);
+  font-size: 13px;
+}
+
+.ai-insight p {
+  min-height: 60px;
+  margin: 0;
+  color: #111827;
+  line-height: 1.6;
+  font-size: 12px;
+}
+
+.insight-loading {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e2e8f0;
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}

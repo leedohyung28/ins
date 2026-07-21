@@ -1,0 +1,245 @@
+.map-card {
+  position: relative;
+  overflow: hidden;
+  padding: 20px;
+  color: #ffffff;
+  background: var(--bg-map);
+  border-radius: var(--card-radius);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.map-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding-right: 130px;
+  font-size: 16px;
+}
+
+.map-helper-text {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.map-card-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 50%;
+  font-size: 11px;
+}
+
+.map-back-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+  transition: 0.2s ease;
+}
+
+.map-back-btn:hover,
+.map-back-btn:focus-visible {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.korea-map {
+  position: relative;
+  width: 100%;
+}
+
+.dashboard-map-canvas {
+  height: 400px;
+}
+
+.analysis-map-canvas {
+  min-height: 340px;
+  height: 46vh;
+  max-height: 500px;
+}
+
+.ratio-map-canvas {
+  min-height: 520px;
+  height: 67vh;
+  max-height: 720px;
+}
+
+.korea-map-svg {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.geography-path {
+  transition:
+    fill 0.2s ease-in-out,
+    stroke 0.2s ease-in-out;
+}
+
+.map-legend {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  z-index: 5;
+  width: 280px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--small-radius);
+  backdrop-filter: blur(2px);
+  font-size: 12px;
+}
+
+.map-legend > p {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.legend-scale-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: #94a3b8;
+}
+
+.legend-gradient {
+  height: 12px;
+  margin-bottom: 8px;
+  background: linear-gradient(
+    to right,
+    #15803d,
+    #84cc16,
+    #eab308,
+    #f97316,
+    #ef4444
+  );
+  border-radius: 6px;
+}
+
+.legend-gradient.reverse {
+  background: linear-gradient(
+    to right,
+    #ef4444,
+    #f97316,
+    #eab308,
+    #84cc16,
+    #15803d
+  );
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.legend-color {
+  width: 12px;
+  height: 12px;
+  background: #94a3b8;
+  border-radius: 2px;
+}
+
+.metric-selector-wrap {
+  margin-top: 20px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--small-radius);
+}
+
+.metric-selector-wrap.compact {
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.metric-selector-title {
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.metric-selector-title strong {
+  color: var(--accent-blue);
+}
+
+.metric-selector {
+  --metric-count: 1;
+  --selected-index: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  overflow: hidden;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--small-radius);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.compact .metric-selector {
+  height: 36px;
+}
+
+.metric-selector-indicator {
+  position: absolute;
+  left: calc((100% / var(--metric-count)) * var(--selected-index));
+  width: calc(100% / var(--metric-count));
+  height: calc(100% - 8px);
+  background: var(--accent-blue);
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.metric-selector button {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0 8px;
+  overflow: hidden;
+  color: #94a3b8;
+  background: transparent;
+  border: 0;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  transition: color 0.25s ease;
+}
+
+.compact .metric-selector button {
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+.metric-selector button.selected {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.metric-selector button:focus-visible {
+  outline: 2px solid #bfdbfe;
+  outline-offset: -3px;
+}

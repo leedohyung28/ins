@@ -1,8 +1,15 @@
-/* App.css */
 .App {
   width: 100vw;
   height: 100vh;
   margin: 0;
   padding: 0;
-  overflow: hidden; /* 대시보드 내부에서 스크롤을 처리하므로 외부 스크롤은 숨김 */
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .App {
+    min-height: 100vh;
+    height: auto;
+    overflow: visible;
+  }
 }
