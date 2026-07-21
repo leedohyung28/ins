@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from "react-simple-maps";
-import { fetchAnalysisInsights } from './insightsService'; // ★ 서비스 파일 임포트
+import { fetchAnalysisInsights } from './insightsService'; 
 import './Dashboard.css';
 
 // 통계청 기준 대한민국 시도 및 시군구 GeoJSON
@@ -41,20 +41,13 @@ const PROVINCE_MAP_CONFIG = {
   '제주': { code: '39', center: [126.5311, 33.3996], zoom: 10 }
 };
 
-const PROVINCE_CENTERS = {
-  '서울': [126.9780, 37.5665], '부산': [129.0756, 35.1795], '대구': [128.6014, 35.8714],
-  '인천': [126.45, 37.4562], '광주': [126.8526, 35.1595], '대전': [127.3845, 36.3504],
-  '울산': [129.3113, 35.5383], '세종': [127.2890, 36.4800], '경기': [127.2693, 37.5],
-  '강원': [128.2093, 37.8228], '충북': [127.9259, 36.6358], '충남': [126.8000, 36.5184],
-  '전북': [127.1530, 35.7175], '전남': [126.9910, 34.8160], '경북': [128.8889, 36.4919],
-  '경남': [128.2500, 35.2382], '제주': [126.5311, 33.3996]
-};
-
 const METRICS = [
   { id: 'damage', label: '우심피해액(원)', unit: '원' }, 
   { id: 'population', label: '인구수(명)', unit: '명' },
-  { id: 'housing', label: '주택 보험 가입 현황(건)', unit: '건' },
-  { id: 'housingZ', label: '주택 보험 가입 현황(Z값)', unit: '' },
+  { id: 'sub_rate_z', label: '가입률(Z값)', unit: '' },
+  { id: 'sub_rate_percent', label: '가입률(%)', unit: '%' },
+  { id: 'target_housing', label: '대상가구(건)', unit: '건' },
+  { id: 'sub_housing', label: '가입가구(건)', unit: '건' },
 ];
 
 const parseVal = (val) => {
@@ -87,40 +80,54 @@ const parseCSV = (csvText) => {
   const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (lines.length < 2) return null;
 
-  let totals = { housing: null, housingZ: null, greenhouse: null, greenhouseZ: null, smallbiz: null, population: null, damage: null };
+  const headers = parseCSVLine(lines[0]);
+  
+  let idxTarget = headers.findIndex(h => h.includes('대상가구'));
+  let idxSub = headers.findIndex(h => h.includes('가입가구'));
+  let idxSubZ = headers.findIndex(h => h.includes('가입률Z값'));
+  let idxSubRatePct = headers.findIndex(h => h.includes('가입률퍼센트')); 
+  let idxPop = headers.findIndex(h => h.includes('인구수'));
+  let idxDamage = headers.findIndex(h => h.includes('우심피해액'));
+
+  if (idxTarget === -1) idxTarget = headers.findIndex(h => h.includes('주택') && h.includes('가입'));
+  if (idxTarget === -1) idxTarget = 1;
+  if (idxSub === -1) idxSub = headers.findIndex(h => h.includes('주택') && h.includes('가입'));
+  if (idxSub === -1) idxSub = 1;
+  if (idxSubZ === -1) idxSubZ = headers.findIndex(h => h.includes('Z값'));
+  if (idxSubZ === -1) idxSubZ = 2;
+  if (idxSubRatePct === -1) idxSubRatePct = 3; 
+  if (idxPop === -1) idxPop = headers.findIndex(h => h.includes('인구수'));
+  if (idxPop === -1) idxPop = 6;
+  if (idxDamage === -1) idxDamage = headers.findIndex(h => h.includes('우심피해액'));
+  if (idxDamage === -1) idxDamage = 7;
+
+  let totals = { target_housing: null, sub_housing: null, sub_rate_z: null, sub_rate_percent: null, population: null, damage: null };
   const dataMap = {};
 
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = 1; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
-    if (cols.length < 8) continue;
+    if (cols.length < 5) continue;
     
     const regionName = cols[0].replace(/\s/g, '');
     if (regionName === '0' || regionName === 'NaN' || regionName.includes('주택')) continue;
 
+    const dataObj = {
+      target_housing: parseVal(cols[idxTarget]),
+      sub_housing: parseVal(cols[idxSub]),
+      sub_rate_z: parseVal(cols[idxSubZ]),
+      sub_rate_percent: parseVal(cols[idxSubRatePct]),
+      population: parseVal(cols[idxPop]),
+      damage: parseVal(cols[idxDamage]), 
+    };
+
     if (regionName === '합계') {
-      totals = {
-        housing: parseVal(cols[1]),
-        housingZ: parseVal(cols[2]),
-        greenhouse: parseVal(cols[3]),
-        greenhouseZ: parseVal(cols[4]),
-        smallbiz: parseVal(cols[5]),
-        population: parseVal(cols[6]),
-        damage: parseVal(cols[7]), 
-      };
+      totals = dataObj;
       continue;
     }
 
     if (!regionName || regionName === '평균' || regionName === '표준편차') continue;
 
-    dataMap[regionName] = {
-      housing: parseVal(cols[1]),
-      housingZ: parseVal(cols[2]),
-      greenhouse: parseVal(cols[3]),
-      greenhouseZ: parseVal(cols[4]),
-      smallbiz: parseVal(cols[5]),
-      population: parseVal(cols[6]),
-      damage: parseVal(cols[7]), 
-    };
+    dataMap[regionName] = dataObj;
   }
 
   return { totals, dataMap };
@@ -145,8 +152,12 @@ const interpolateColor = (color1, color2, factor) => {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
 };
 
-const getGradientColor = (ratio) => {
-  const stops = ['#15803D', '#84CC16', '#EAB308', '#F97316', '#EF4444']; 
+const getGradientColor = (ratio, isReverse = false) => {
+  let stops = ['#15803D', '#84CC16', '#EAB308', '#F97316', '#EF4444']; 
+  if (isReverse) {
+    stops = ['#EF4444', '#F97316', '#EAB308', '#84CC16', '#15803D']; 
+  }
+  
   if (ratio <= 0) return stops[0];
   if (ratio >= 1) return stops[stops.length - 1];
   
@@ -210,22 +221,20 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
-  // ★ 인사이트 데이터 상태 추가
   const [insightsDictionary, setInsightsDictionary] = useState({});
   const [isInsightLoading, setIsInsightLoading] = useState(false);
   const [insightText, setInsightText] = useState('');
 
-  // 듀얼 맵 (비교1) 용 상태
   const [selectedMetricIdxA, setSelectedMetricIdxA] = useState(0);
   const [selectedMetricIdxB, setSelectedMetricIdxB] = useState(1);
   const [checkedRangesA, setCheckedRangesA] = useState([]); 
   const [checkedRangesB, setCheckedRangesB] = useState([]);
 
-  // 커스텀 분수 맵 (비교2) 용 상태
   const calcOptions = [
     { id: 'damage', label: '우심피해액(원)' },
     { id: 'population', label: '인구수(명)' },
-    { id: 'housing', label: '주택보험가입현황(건)' }
+    { id: 'target_housing', label: '대상가구(건)' },
+    { id: 'sub_housing', label: '가입가구(건)' }
   ];
   const [numeratorIdx, setNumeratorIdx] = useState(0);   
   const [denominatorIdx, setDenominatorIdx] = useState(1); 
@@ -234,7 +243,6 @@ const Dashboard = () => {
   const [csvLastModified] = useState('2026-07-20 23:59:59');
   const [isInfoHovered, setIsInfoHovered] = useState(false);
 
-  // ★ 첫 마운트 시 인사이트 데이터 로드
   useEffect(() => {
     const loadInsights = async () => {
       const baseUrl = getBaseUrl();
@@ -397,7 +405,6 @@ const Dashboard = () => {
     setHoveredMunicipality(null); 
   };
 
-
   const currentNational = nationalDataCache[selectedYear] || { totals: {}, dataMap: {} };
   let currentMapData = {};
   let currentTotals = {};
@@ -417,29 +424,39 @@ const Dashboard = () => {
     let min = Infinity;
     let max = -Infinity;
     
-    Object.values(currentMapData).forEach(d => {
-      const val = d[metricId];
-      if (val !== null && val !== undefined) {
-        if (val < min) min = val;
-        if (val > max) max = val;
-      }
-    });
+    if (metricId === 'sub_rate_percent') {
+      min = 0;
+      max = 1;
+    } else {
+      Object.values(currentMapData).forEach(d => {
+        const val = d[metricId];
+        if (val !== null && val !== undefined) {
+          if (val < min) min = val;
+          if (val > max) max = val;
+        }
+      });
+    }
+
+    const isReverse = metricId === 'sub_rate_z' || metricId === 'sub_rate_percent';
 
     const getFilterColor = (val, ratio) => {
       if (val === null || val === undefined) return '#94A3B8';
       
       if (checkedRanges.length === 0) {
         if (min === max) return '#EAB308';
-        return getGradientColor(ratio);
+        return getGradientColor(ratio, isReverse);
       }
 
       const rangeIndex = Math.min(9, Math.floor(ratio * 10)); 
       
       if (checkedRanges.includes(rangeIndex)) {
-        const stops10 = [
+        let stops10 = [
           '#15803D', '#22C55E', '#84CC16', '#D9F99D', '#FEF08A', 
           '#EAB308', '#F97316', '#EA580C', '#EF4444', '#B91C1C'
         ];
+        if (isReverse) {
+          stops10 = [...stops10].reverse();
+        }
         return stops10[rangeIndex];
       }
       return '#E2E8F0'; 
@@ -519,9 +536,11 @@ const Dashboard = () => {
     return { processedData, min, max };
   };
 
-  const dashboardMapData = processMapData(currentMetric.id, []).processedData;
-  const dashboardMin = processMapData(currentMetric.id, []).min;
-  const dashboardMax = processMapData(currentMetric.id, []).max;
+  const { 
+    processedData: dashboardMapData, 
+    min: dashboardMin, 
+    max: dashboardMax 
+  } = processMapData(currentMetric.id, []);
 
   const mapDataA = processMapData(METRICS[selectedMetricIdxA].id, checkedRangesA);
   const mapDataB = processMapData(METRICS[selectedMetricIdxB].id, checkedRangesB);
@@ -560,10 +579,7 @@ const Dashboard = () => {
     .sort((a, b) => b[1][currentMetric.id] - a[1][currentMetric.id])
     .slice(0, 5);
 
-  // ★ 현재 활성화된 데이터 기반으로 알맞은 인사이트 키 탐색 로직
   const currentInsight = useMemo(() => {
-    if (Object.keys(insightsDictionary).length === 0) return '';
-    
     let regionLevel = '';
     let sido = '';
     let regionName = '';
@@ -587,25 +603,22 @@ const Dashboard = () => {
     const indicatorId = currentMetric?.id || 'overall';
     const lookupKey = `${selectedYear}|${regionLevel}|${sido}|${regionName}|${indicatorId}`;
     const defaultKey = `${selectedYear}|${regionLevel}|${sido}|${regionName}|overall`;
+    
+    const fallbackInsight = `선택하신 ${targetName}의 ${selectedYear || '-'}년 기준 상세 지표 현황입니다. 지도 아래의 슬라이더를 통해 항목을 변경하여 직관적인 분포도를 확인할 수 있습니다.`;
 
-    // 선택된 지표에 맞는 데이터가 있으면 반환, 없으면 overall 기본값, 그래도 없으면 빈 문자열 반환
-    return insightsDictionary[lookupKey] || insightsDictionary[defaultKey] || '';
+    if (Object.keys(insightsDictionary).length === 0) return fallbackInsight;
+
+    return insightsDictionary[lookupKey] || insightsDictionary[defaultKey] || fallbackInsight;
   }, [insightsDictionary, targetName, mapView, selectedRegion, selectedYear, currentMetric]);
 
-  // ★ 인사이트 텍스트 상태 및 애니메이션 제어
   useEffect(() => {
     if (activeTab === 'dashboard') {
-      if (currentInsight) {
-        setIsInsightLoading(true);
-        const timer = setTimeout(() => {
-          setIsInsightLoading(false);
-          setInsightText(currentInsight);
-        }, 1200); // 뷰 전환 시 부드러운 로딩 효과
-        return () => clearTimeout(timer);
-      } else {
+      setIsInsightLoading(true);
+      const timer = setTimeout(() => {
         setIsInsightLoading(false);
-        setInsightText('');
-      }
+        setInsightText(currentInsight);
+      }, 1200); 
+      return () => clearTimeout(timer);
     }
   }, [currentInsight, activeTab]);
 
@@ -617,34 +630,30 @@ const Dashboard = () => {
     }
   };
 
-  const renderMapText = (geo, val) => {
-    if (val === null || val === undefined || val === '-') return null;
-    
-    if (mapView === 'national') {
-      const name = nameMapping[geo.properties.name] || geo.properties.name;
-      const center = PROVINCE_CENTERS[name];
-      if (!center) return null;
-      
-      return (
-        <text
-          x={center[0]}
-          y={center[1]}
-          textAnchor="middle"
-          alignmentBaseline="middle"
-          style={{
-            fill: "#FFFFFF",
-            fontSize: "10px",
-            fontWeight: "bold",
-            pointerEvents: "none",
-            textShadow: "1px 1px 2px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)"
-          }}
-        >
-          {val.toLocaleString()}
-        </text>
-      );
+  let displaySubHousingTotal = currentTotals.sub_housing;
+  let displayPopulationTotal = currentTotals.population;
+  let displayDamageTotal = currentTotals.damage;
+
+  if (mapView === 'province') {
+    const parentData = nationalDataCache[selectedYear]?.dataMap[selectedRegion];
+    if (parentData) {
+      if (displaySubHousingTotal === null || displaySubHousingTotal === undefined || displaySubHousingTotal === '-') {
+        if (parentData.sub_housing !== undefined && parentData.sub_housing !== null) {
+          displaySubHousingTotal = parentData.sub_housing;
+        }
+      }
+      if (displayPopulationTotal === null || displayPopulationTotal === undefined || displayPopulationTotal === '-') {
+        if (parentData.population !== undefined && parentData.population !== null) {
+          displayPopulationTotal = parentData.population;
+        }
+      }
+      if (displayDamageTotal === null || displayDamageTotal === undefined || displayDamageTotal === '-') {
+        if (parentData.damage !== undefined && parentData.damage !== null) {
+          displayDamageTotal = parentData.damage;
+        }
+      }
     }
-    return null;
-  };
+  }
 
   const renderAnalysisView = () => {
 
@@ -718,11 +727,16 @@ const Dashboard = () => {
               {Array.from({length: 10}).map((_, idx) => {
                 const isChecked = checkedRanges.includes(idx);
                 const label = `${idx*10}~${(idx+1)*10}%`;
-                const stops10 = [
+                
+                let stops10 = [
                   '#15803D', '#22C55E', '#84CC16', '#D9F99D', '#FEF08A', 
                   '#EAB308', '#F97316', '#EA580C', '#EF4444', '#B91C1C'
                 ];
+                if (METRICS[metricIdx].id === 'sub_rate_z' || METRICS[metricIdx].id === 'sub_rate_percent') {
+                  stops10 = [...stops10].reverse();
+                }
                 const baseColor = stops10[idx];
+                
                 return (
                   <div 
                     key={idx}
@@ -759,7 +773,9 @@ const Dashboard = () => {
                 {mapDataObj.filteredRegions.map((regionData, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                     <span>{regionData.name}</span>
-                    <span style={{ color: '#FFF', fontWeight: 'bold' }}>{regionData.value.toLocaleString()}</span>
+                    <span style={{ color: '#FFF', fontWeight: 'bold' }}>
+                      {METRICS[metricIdx].id === 'sub_rate_percent' ? (regionData.value * 100).toFixed(2) + '%' : regionData.value.toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -826,7 +842,6 @@ const Dashboard = () => {
                               }}
                               title={name}
                             />
-                            {d && d.displayValue !== '-' && renderMapText(geo, parseFloat(d.displayValue.toFixed(3)))}
                           </g>
                         );
                       })
@@ -962,7 +977,6 @@ const Dashboard = () => {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
           }
-          /* ✨ 말풍선 툴팁 애니메이션 */
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-5px); }
             to { opacity: 1; transform: translateY(0); }
@@ -1065,7 +1079,7 @@ const Dashboard = () => {
                   <div className="stat-icon" style={{color: '#8B5CF6'}}>👥</div>
                   <div className="stat-info">
                     <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 인구수</p>
-                    <h2>{currentTotals.population !== null && currentTotals.population !== undefined ? currentTotals.population.toLocaleString() : '-'} <span>명</span></h2>
+                    <h2>{displayPopulationTotal !== null && displayPopulationTotal !== undefined ? displayPopulationTotal.toLocaleString() : '-'} <span>명</span></h2>
                   </div>
                 </div>
 
@@ -1073,15 +1087,15 @@ const Dashboard = () => {
                   <div className="stat-icon" style={{color: '#EF4444'}}>🚨</div>
                   <div className="stat-info">
                     <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 우심피해액</p>
-                    <h2>{currentTotals.damage !== null && currentTotals.damage !== undefined ? currentTotals.damage.toLocaleString() : '-'} <span>원</span></h2>
+                    <h2>{displayDamageTotal !== null && displayDamageTotal !== undefined ? displayDamageTotal.toLocaleString() : '-'} <span>원</span></h2>
                   </div>
                 </div>
                 
                 <div className="stat-card">
                   <div className="stat-icon" style={{color: '#3B82F6'}}>🏠</div>
                   <div className="stat-info">
-                    <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 주택 보험 가입 현황</p>
-                    <h2>{currentTotals.housing !== null && currentTotals.housing !== undefined ? currentTotals.housing.toLocaleString() : '-'} <span>건</span></h2>
+                    <p>{mapView === 'national' ? '전국' : selectedRegion} 전체 가입가구</p>
+                    <h2>{displaySubHousingTotal !== null && displaySubHousingTotal !== undefined ? displaySubHousingTotal.toLocaleString() : '-'} <span>건</span></h2>
                   </div>
                 </div>
               </div>
@@ -1090,7 +1104,7 @@ const Dashboard = () => {
                 <div className="left-column">
                   <div className="map-card" style={{ overflow: 'hidden', height: 'auto', minHeight: '500px' }}>
                     <h3>
-                      {selectedYear || '-'}년 지역별 지표 현황 ⓘ 
+                      {selectedYear || '-'}년 지역별 지표 현황
                       <span style={{fontSize:'12px', color:'#94A3B8', marginLeft:'8px'}}>
                         {mapView === 'national' ? '(시/도를 클릭하여 줌인하세요)' : '(시/군/구를 클릭하여 상세 조회하세요)'}
                       </span>
@@ -1102,17 +1116,30 @@ const Dashboard = () => {
                       </button>
                     )}
 
-                    <div className="map-legend">
+                    {/* ✨ [수정] 범례(Legend) 가로 폭 강제 확장 */}
+                    <div className="map-legend" style={{ width: '280px' }}>
                       <p style={{marginBottom: '8px', fontWeight: 'bold'}}>{currentMetric.label} 분포</p>
                       
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94A3B8', marginBottom: '4px' }}>
-                        <span>낮음</span>
-                        <span>높음</span>
+                      <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94A3B8', marginBottom: '4px' }}>
+                        {currentMetric.id === 'sub_rate_percent' ? (
+                          <>
+                            <span>0%</span>
+                            <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>50%</span>
+                            <span>100%</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>낮음</span>
+                            <span>높음</span>
+                          </>
+                        )}
                       </div>
                       
                       <div style={{
                         height: '12px',
-                        background: 'linear-gradient(to right, #15803D, #84CC16, #EAB308, #F97316, #EF4444)',
+                        background: (currentMetric.id === 'sub_rate_z' || currentMetric.id === 'sub_rate_percent')
+                          ? 'linear-gradient(to right, #EF4444, #F97316, #EAB308, #84CC16, #15803D)'
+                          : 'linear-gradient(to right, #15803D, #84CC16, #EAB308, #F97316, #EF4444)',
                         borderRadius: '6px',
                         marginBottom: '8px'
                       }}></div>
@@ -1151,7 +1178,6 @@ const Dashboard = () => {
                                         }}
                                         title={`${geo.properties.name} (클릭하여 줌인)`}
                                       />
-                                      {d && renderMapText(geo, d.displayValue)}
                                     </g>
                                   );
                                 })
@@ -1267,7 +1293,9 @@ const Dashboard = () => {
                               <div className="bar-track" style={{ flex: 1, backgroundColor: '#F1F5F9', borderRadius: '6px', height: '12px', overflow: 'hidden' }}>
                                 <div className="bar-fill" style={{width: `${Math.max(barWidth, 5)}%`, backgroundColor: region[1].color, height: '100%', borderRadius: '6px'}}></div>
                               </div>
-                              <span className="bar-value" style={{ width: '80px', textAlign: 'right' }}>{val.toLocaleString()}</span>
+                              <span className="bar-value" style={{ width: '80px', textAlign: 'right' }}>
+                                {currentMetric.id === 'sub_rate_percent' ? (val * 100).toFixed(2) + '%' : val.toLocaleString()}
+                              </span>
                             </div>
                           )
                         }) : (
@@ -1292,7 +1320,9 @@ const Dashboard = () => {
                       <div className="index-score" style={{ textAlign: 'left', width: '100%' }}>
                         <p style={{ textAlign: 'left', margin: '0 0 8px 0' }}>선택된 지표 ({currentMetric.label})</p>
                         <h1 style={{ color: displayData.color, justifyContent: 'flex-start' }}>
-                          {displayData.displayValue !== '-' ? displayData.displayValue.toLocaleString() : '-'}
+                          {displayData.displayValue !== '-' 
+                            ? (currentMetric.id === 'sub_rate_percent' ? (displayData.displayValue * 100).toFixed(2) : displayData.displayValue.toLocaleString()) 
+                            : '-'}
                           <span style={{fontSize: '16px', marginLeft: '4px'}}>{currentMetric.unit}</span>
                         </h1>
                       </div>
@@ -1301,13 +1331,36 @@ const Dashboard = () => {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
                       
                       <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
-                        <p style={{ margin: 0, fontSize: '13px' }}>주택 보험 가입 현황</p>
+                        <p style={{ margin: 0, fontSize: '13px' }}>대상가구</p>
                         <h4 style={{fontSize: '16px', margin: 0}}>
-                          {displayData.housing !== null && displayData.housing !== undefined ? displayData.housing.toLocaleString() : '-'}
+                          {displayData.target_housing !== null && displayData.target_housing !== undefined ? displayData.target_housing.toLocaleString() : '-'}
                           <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#94A3B8', marginLeft: '4px' }}>건</span>
                         </h4>
                       </div>
                       
+                      <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px' }}>가입가구</p>
+                        <h4 style={{fontSize: '16px', margin: 0}}>
+                          {displayData.sub_housing !== null && displayData.sub_housing !== undefined ? displayData.sub_housing.toLocaleString() : '-'}
+                          <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#94A3B8', marginLeft: '4px' }}>건</span>
+                        </h4>
+                      </div>
+
+                      <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px' }}>가입률(%)</p>
+                        <h4 style={{fontSize: '16px', margin: 0}}>
+                          {displayData.sub_rate_percent !== null && displayData.sub_rate_percent !== undefined ? (displayData.sub_rate_percent * 100).toFixed(2) : '-'}
+                          <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#94A3B8', marginLeft: '4px' }}>%</span>
+                        </h4>
+                      </div>
+
+                      <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px' }}>가입률(Z값)</p>
+                        <h4 style={{fontSize: '16px', margin: 0}}>
+                          {displayData.sub_rate_z !== null && displayData.sub_rate_z !== undefined ? displayData.sub_rate_z.toLocaleString() : '-'}
+                        </h4>
+                      </div>
+
                       <div className="metric-box" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
                         <p style={{ margin: 0, fontSize: '13px' }}>우심피해액</p>
                         <h4 style={{fontSize: '16px', margin: 0}}>
@@ -1326,25 +1379,22 @@ const Dashboard = () => {
 
                     </div>
 
-                    {/* ★ 인사이트 데이터가 존재할 때만 표시되는 영역 */}
-                    { (isInsightLoading || insightText) && (
-                      <div className="ai-insight" style={{ minHeight: '120px' }}>
-                        <h4>✨ 분석 인사이트</h4>
-                        {isInsightLoading ? (
-                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60px' }}>
-                            <div style={{
-                              width: '24px', height: '24px', 
-                              border: '3px solid #E2E8F0', borderTop: '3px solid #3B82F6', 
-                              borderRadius: '50%', animation: 'spin 1s linear infinite'
-                            }}></div>
-                          </div>
-                        ) : (
-                          <p style={{ minHeight: '60px' }}>
-                            <TypewriterEffect text={insightText} delay={30} />
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <div className="ai-insight" style={{ minHeight: '120px' }}>
+                      <h4>✨ 분석 인사이트</h4>
+                      {isInsightLoading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60px' }}>
+                          <div style={{
+                            width: '24px', height: '24px', 
+                            border: '3px solid #E2E8F0', borderTop: '3px solid #3B82F6', 
+                            borderRadius: '50%', animation: 'spin 1s linear infinite'
+                          }}></div>
+                        </div>
+                      ) : (
+                        <p style={{ minHeight: '60px', margin: 0, lineHeight: '1.6', color: '#000000' }}>
+                          <TypewriterEffect text={insightText} delay={30} />
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
