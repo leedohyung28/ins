@@ -9,6 +9,12 @@ import {
 const OUTSIDE_PROVINCE_COLOR = "#1F2937";
 const NO_DATA_COLOR = "#94A3B8";
 
+// Map boundary styles. Municipality borders need at least about 1 SVG unit
+// to remain visible after the map is fitted into the dashboard card.
+const NATIONAL_BORDER_COLOR = "#0F172A";
+const MUNICIPALITY_BORDER_COLOR = "#000000";
+const OUTSIDE_BORDER_COLOR = "rgba(255,255,255,0.08)";
+
 const KoreaMap = ({
   mapView,
   mapCenter,
@@ -56,6 +62,24 @@ const KoreaMap = ({
                 mapView === "national" ||
                 (isSelectedProvince && enableMunicipalityClick);
 
+              const defaultStroke =
+                mapView === "national"
+                  ? NATIONAL_BORDER_COLOR
+                  : isSelectedProvince
+                    ? isSelectedMunicipality
+                      ? "#FFFFFF"
+                      : MUNICIPALITY_BORDER_COLOR
+                    : OUTSIDE_BORDER_COLOR;
+
+              const defaultStrokeWidth =
+                mapView === "national"
+                  ? 0.8
+                  : isSelectedProvince
+                    ? isSelectedMunicipality
+                      ? 2.2
+                      : 1.05
+                    : 0.15;
+
               return (
                 <Geography
                   key={geography.rsmKey}
@@ -77,23 +101,15 @@ const KoreaMap = ({
                     }
                   }}
                   onMouseLeave={() => onRegionLeave?.()}
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering="geometricPrecision"
                   style={{
                     default: {
                       fill,
-                      stroke:
-                        mapView === "national"
-                          ? "#1C2B44"
-                          : isSelectedProvince
-                            ? "rgba(255,255,255,0.6)"
-                            : "rgba(255,255,255,0.05)",
-                      strokeWidth:
-                        mapView === "national"
-                          ? 0.5
-                          : isSelectedMunicipality
-                            ? 2
-                            : isSelectedProvince
-                              ? 0.3
-                              : 0.1,
+                      stroke: defaultStroke,
+                      strokeWidth: defaultStrokeWidth,
+                      strokeLinejoin: "round",
+                      strokeLinecap: "round",
                       outline: "none",
                     },
                     hover: {
@@ -102,8 +118,14 @@ const KoreaMap = ({
                           ? "#3B82F6"
                           : "#4B5563"
                         : OUTSIDE_PROVINCE_COLOR,
-                      stroke: mapView === "national" ? "#FFFFFF" : undefined,
-                      strokeWidth: mapView === "national" ? 1 : undefined,
+                      stroke: isSelectedProvince ? "#FFFFFF" : defaultStroke,
+                      strokeWidth: isSelectedProvince
+                        ? mapView === "national"
+                          ? 1.4
+                          : 1.7
+                        : defaultStrokeWidth,
+                      strokeLinejoin: "round",
+                      strokeLinecap: "round",
                       cursor: isInteractive ? "pointer" : "default",
                       outline: "none",
                     },
@@ -111,6 +133,10 @@ const KoreaMap = ({
                       fill: isSelectedProvince
                         ? "#2563EB"
                         : OUTSIDE_PROVINCE_COLOR,
+                      stroke: isSelectedProvince ? "#FFFFFF" : defaultStroke,
+                      strokeWidth: isSelectedProvince ? 2 : defaultStrokeWidth,
+                      strokeLinejoin: "round",
+                      strokeLinecap: "round",
                       outline: "none",
                     },
                   }}
