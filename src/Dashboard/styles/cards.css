@@ -259,3 +259,8 @@
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
+
+
+.insight-text {
+  white-space: pre-line;
+}

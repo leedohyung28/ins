@@ -65,7 +65,7 @@ const RegionDetailCard = ({
           <span className="spinner" />
         </div>
       ) : (
-        <p>
+        <p className="insight-text">
           <TypewriterEffect text={insightText} delay={30} />
         </p>
       )}
